@@ -1,0 +1,92 @@
+# --- Environment / secrets ---
+.env
+.env.*
+!.env.example
+!.env.test.example
+!.env.local.example
+*.pem
+*.key
+
+# --- Python ---
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.venv/
+venv/
+env/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+coverage.xml
+htmlcov/
+dist/
+build/
+
+# --- Alembic ---
+backend/app/**/*.pyc
+
+# --- Node / frontend ---
+node_modules/
+.next/
+out/
+.turbo/
+frontend/dist/
+*.tsbuildinfo
+.eslintcache
+
+# --- Docker / infra ---
+*.log
+docker-compose.override.yml
+
+# --- Storage / uploads (local dev only; anchored so it doesn't shadow the
+# backend/app/storage/ *source* package) ---
+/backend/storage/
+/backend/uploads/
+qdrant_storage/
+postgres_data/
+redis_data/
+grafana_data/
+prometheus_data/
+
+# --- IDE / OS ---
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# --- Test / build artifacts ---
+.tox/
+*.sqlite3
+
+# --- Local data / exports (root-anchored to preserve source packages) ---
+/qdrant_data/
+/backend_storage/
+/storage/
+/uploads/
+/backups/
+/dumps/
+
+# --- Local credentials / private-key containers ---
+/.aws/
+/.ssh/
+/secrets/
+*.p12
+*.pfx
+*.jks
+*.keystore
+
+# --- Additional test artifacts ---
+.coverage.*
+.nox/
+coverage/
+.nyc_output/
+
+# --- Additional editor / OS temporary files ---
+desktop.ini
+$RECYCLE.BIN/
+*.swp
+*.swo
+*~
