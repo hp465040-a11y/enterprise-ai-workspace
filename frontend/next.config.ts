@@ -2,6 +2,10 @@ import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
   reactStrictMode: true,
+  // The investigation API has a 690 s outer deadline. Keep the dev rewrite
+  // open long enough to deliver its report or bounded failure response.
+  experimental: { proxyTimeout: 720_000 },
+  ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),
   // Standalone output traces the minimal `node_modules` subset needed to
   // run `server.js` directly — lets the Docker image skip shipping the
   // full node_modules tree (see frontend/Dockerfile's runner stage).

@@ -13,6 +13,8 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from app.db.base_class import Base, TimestampMixin, UUIDPKMixin
 
 if TYPE_CHECKING:
+    from app.models.exception_case import ExceptionCase
+    from app.models.fulfillment_event import FulfillmentEvent
     from app.models.order_item import OrderItem
     from app.models.organization import Organization
     from app.models.refund import Refund
@@ -116,6 +118,12 @@ class Order(Base, UUIDPKMixin, TimestampMixin):
     ordered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
 
     organization: Mapped["Organization"] = relationship()
+    exception_cases: Mapped[list["ExceptionCase"]] = relationship(
+        back_populates="order", passive_deletes="all"
+    )
+    fulfillment_events: Mapped[list["FulfillmentEvent"]] = relationship(
+        back_populates="order", passive_deletes="all"
+    )
     items: Mapped[list["OrderItem"]] = relationship(back_populates="order", passive_deletes="all")
     refunds: Mapped[list["Refund"]] = relationship(back_populates="order", passive_deletes="all")
     return_requests: Mapped[list["ReturnRequest"]] = relationship(

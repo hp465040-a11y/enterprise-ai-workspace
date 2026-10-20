@@ -38,22 +38,24 @@ from app.workers.celery_app import celery_app
 logger = get_logger(__name__)
 
 
-async def _mark_failed(document_id: uuid.UUID, error_message: str) -> None:
+async def _mark_failed(document_id: uuid.UUID, error_message: str, celery_task_id: str | None) -> None:
     async with worker_db_session() as db:
-        document = await db.get(Document, document_id)
-        if document is not None:
-            document.status = DocumentStatus.FAILED.value
-            document.error_message = error_message[:2048]
-
         job = (
             await db.execute(
                 select(IngestionJob)
-                .where(IngestionJob.document_id == document_id)
-                .order_by(IngestionJob.created_at.desc())
+                .where(
+                    IngestionJob.document_id == document_id,
+                    IngestionJob.celery_task_id == celery_task_id,
+                    IngestionJob.status == IngestionStatus.RUNNING.value,
+                )
                 .limit(1)
             )
         ).scalar_one_or_none()
         if job is not None:
+            document = await db.get(Document, document_id)
+            if document is not None:
+                document.status = DocumentStatus.FAILED.value
+                document.error_message = error_message[:2048]
             job.status = IngestionStatus.FAILED.value
             job.error_message = error_message[:2048]
             job.completed_at = datetime.now(UTC)
@@ -67,7 +69,7 @@ class _IngestionTask(celery_app.Task):
     def on_failure(self, exc: BaseException, task_id: str, args: tuple, kwargs: dict, einfo: object) -> None:
         document_id_str = args[0] if args else kwargs.get("document_id")
         if document_id_str:
-            asyncio.run(_mark_failed(uuid.UUID(document_id_str), str(exc)))
+            asyncio.run(_mark_failed(uuid.UUID(document_id_str), str(exc), task_id))
 
 
 @celery_app.task(
@@ -88,9 +90,29 @@ async def _process_document(document_id_str: str, celery_task_id: str | None) ->
     document_id = uuid.UUID(document_id_str)
 
     async with worker_db_session() as db:
-        document = await db.get(Document, document_id)
+        document = await db.scalar(
+            select(Document).where(Document.id == document_id).with_for_update()
+        )
         if document is None:
             logger.error("ingestion_document_not_found", document_id=document_id_str)
+            return
+
+        job = (
+            await db.execute(
+                select(IngestionJob)
+                .where(IngestionJob.document_id == document_id)
+                .order_by(IngestionJob.created_at.desc(), IngestionJob.id.desc())
+                .limit(1)
+            )
+        ).scalar_one_or_none()
+        if job is None or not (
+            job.status == IngestionStatus.PENDING.value
+            or (job.status == IngestionStatus.RUNNING.value and job.celery_task_id == celery_task_id)
+        ):
+            logger.info("ingestion_duplicate_skipped", document_id=document_id_str)
+            return
+        if job.status == IngestionStatus.RUNNING.value and document.status != DocumentStatus.PROCESSING.value:
+            logger.info("ingestion_stale_retry_skipped", document_id=document_id_str)
             return
 
         workspace = await db.get(Workspace, document.workspace_id)
@@ -103,15 +125,10 @@ async def _process_document(document_id_str: str, celery_task_id: str | None) ->
         mime_type = document.mime_type
         storage_path = document.storage_path
 
-        db.add(
-            IngestionJob(
-                document_id=document.id,
-                status=IngestionStatus.RUNNING.value,
-                stage=IngestionStage.PARSING.value,
-                celery_task_id=celery_task_id,
-                started_at=datetime.now(UTC),
-            )
-        )
+        job.status = IngestionStatus.RUNNING.value
+        job.stage = IngestionStage.PARSING.value
+        job.celery_task_id = celery_task_id
+        job.started_at = job.started_at or datetime.now(UTC)
         document.status = DocumentStatus.PROCESSING.value
         document.error_message = None
 
@@ -174,8 +191,8 @@ async def _process_document(document_id_str: str, celery_task_id: str | None) ->
         raise  # let Celery's autoretry handle it
     except Exception as exc:  # noqa: BLE001 — terminal: record and stop, don't retry
         logger.error("ingestion_failed", document_id=document_id_str, error=str(exc))
-        await _mark_failed(document_id, str(exc))
-        return
+        await _mark_failed(document_id, str(exc), celery_task_id)
+        raise
 
     # --- Persist the new chunk set and mark the document/job complete. ---
     async with worker_db_session() as db:
@@ -191,8 +208,11 @@ async def _process_document(document_id_str: str, celery_task_id: str | None) ->
         job = (
             await db.execute(
                 select(IngestionJob)
-                .where(IngestionJob.document_id == document_id)
-                .order_by(IngestionJob.created_at.desc())
+                .where(
+                    IngestionJob.document_id == document_id,
+                    IngestionJob.celery_task_id == celery_task_id,
+                    IngestionJob.status == IngestionStatus.RUNNING.value,
+                )
                 .limit(1)
             )
         ).scalar_one_or_none()

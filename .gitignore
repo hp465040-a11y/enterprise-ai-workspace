@@ -90,3 +90,6 @@ $RECYCLE.BIN/
 *.swp
 *.swo
 *~
+/scripts/action_request_demo_state.json
+/scripts/investigation_page_demo_state.json
+/frontend/.next-investigation/

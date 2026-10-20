@@ -1,12 +1,14 @@
 from fastapi import APIRouter
 
 from app.api.v1.endpoints import (
+    action_requests,
     admin,
     analytics,
     auth,
     conversations,
     documents,
     health,
+    investigations,
     organizations,
     users,
     workspaces,
@@ -18,6 +20,8 @@ api_router.include_router(health.router)
 api_router.include_router(auth.router)
 api_router.include_router(users.router)
 api_router.include_router(organizations.router)
+api_router.include_router(action_requests.router)
+api_router.include_router(investigations.router)
 api_router.include_router(workspaces.router)
 api_router.include_router(documents.router)
 api_router.include_router(conversations.router)

@@ -75,7 +75,13 @@ async def hybrid_retrieve_node(state: RAGState, config: RunnableConfig) -> dict:
     result = await db.execute(
         select(DocumentChunk, Document.original_filename)
         .join(Document, Document.id == DocumentChunk.document_id)
-        .where(DocumentChunk.id.in_(chunk_ids))
+        .where(
+            DocumentChunk.id.in_(chunk_ids),
+            # Treat vector/index IDs as candidates, not authorization. Both the
+            # chunk and its document must still belong to the selected scope.
+            DocumentChunk.workspace_id == workspace_id,
+            Document.workspace_id == workspace_id,
+        )
     )
     by_id = {chunk.id: (chunk, filename) for chunk, filename in result.all()}
 

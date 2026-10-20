@@ -1,6 +1,6 @@
 "use client";
 
-import { BarChart3, FileText, MessageSquare, Settings } from "lucide-react";
+import { BarChart3, ClipboardList, FileText, MessageSquare, Settings } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 
@@ -36,6 +36,22 @@ export function Sidebar({ organizationId }: { organizationId: string }) {
       </div>
 
       <nav className="flex-1 space-y-1 px-3">
+        <Link href="/investigations" className={cn(
+          "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+          pathname === "/investigations"
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+        )}>
+          <ClipboardList className="h-4 w-4" />订单调查
+        </Link>
+        <Link href="/action-requests" className={cn(
+          "flex items-center gap-2 rounded-md px-3 py-2 text-sm font-medium transition-colors",
+          pathname === "/action-requests"
+            ? "bg-primary text-primary-foreground"
+            : "text-muted-foreground hover:bg-accent hover:text-accent-foreground",
+        )}>
+          <ClipboardList className="h-4 w-4" />客户通知申请
+        </Link>
         {workspaceId &&
           navItems.map((item) => {
             const href = item.href(workspaceId);

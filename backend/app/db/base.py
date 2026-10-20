@@ -14,12 +14,17 @@ imported somewhere" guarantees, not as a shortcut import path.
 """
 
 from app.db.base_class import Base  # noqa: F401
+from app.models.action_request import ActionRequest  # noqa: F401
 from app.models.api_key import APIKey  # noqa: F401
 from app.models.audit import AuditLog  # noqa: F401
 from app.models.chunk import DocumentChunk  # noqa: F401
 from app.models.conversation import Conversation  # noqa: F401
+from app.models.customer_notification import CustomerNotification  # noqa: F401
 from app.models.document import Document  # noqa: F401
+from app.models.exception_case import ExceptionCase  # noqa: F401
+from app.models.fulfillment_event import FulfillmentEvent  # noqa: F401
 from app.models.ingestion_job import IngestionJob  # noqa: F401
+from app.models.inventory_record import InventoryRecord  # noqa: F401
 from app.models.message import Message, MessageCitation  # noqa: F401
 from app.models.order import Order  # noqa: F401
 from app.models.order_item import OrderItem  # noqa: F401

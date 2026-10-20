@@ -10,7 +10,7 @@ from abc import ABC, abstractmethod
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager
 from dataclasses import dataclass, field
-from typing import Literal
+from typing import Any, Literal
 
 Role = Literal["user", "assistant"]
 Effort = Literal["low", "medium", "high", "xhigh", "max"]
@@ -38,6 +38,38 @@ class LLMResponse:
     usage: LLMUsage = field(default_factory=LLMUsage)
 
 
+@dataclass(frozen=True, slots=True)
+class LLMToolDefinition:
+    name: str
+    description: str
+    input_schema: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class LLMToolCall:
+    id: str
+    name: str
+    arguments: dict[str, Any]
+
+
+@dataclass(frozen=True, slots=True)
+class LLMToolMessage:
+    role: Literal["user", "assistant", "tool"]
+    content: str = ""
+    tool_calls: list[LLMToolCall] = field(default_factory=list)
+    tool_call_id: str | None = None
+    tool_name: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
+class LLMToolResponse:
+    content: str
+    model: str
+    stop_reason: str | None
+    tool_calls: list[LLMToolCall] = field(default_factory=list)
+    usage: LLMUsage = field(default_factory=LLMUsage)
+
+
 class LLMStream(ABC):
     """Handle returned by `LLMProvider.stream(...)`. Consume `text_stream` for
     incremental output, then call `get_final_response()` once the stream is
@@ -52,6 +84,17 @@ class LLMStream(ABC):
 
 
 class LLMProvider(ABC):
+    async def generate_with_tools(
+        self,
+        *,
+        messages: list[LLMToolMessage],
+        tools: list[LLMToolDefinition],
+        system: str | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMToolResponse:
+        """Non-streaming tool protocol only; execution belongs to the caller."""
+        raise NotImplementedError(f"{type(self).__name__} does not support Tool Calling")
+
     @abstractmethod
     async def generate(
         self,

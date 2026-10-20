@@ -13,12 +13,23 @@ from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
 
 import anthropic
-from anthropic.types import MessageParam
+from anthropic.types import MessageParam, TextBlockParam, ToolParam, ToolResultBlockParam, ToolUseBlockParam
 from anthropic.types.output_config_param import OutputConfigParam
 from anthropic.types.thinking_config_adaptive_param import ThinkingConfigAdaptiveParam
 from anthropic.types.thinking_config_disabled_param import ThinkingConfigDisabledParam
 
-from app.ai.llm.base import Effort, LLMMessage, LLMProvider, LLMResponse, LLMStream, LLMUsage
+from app.ai.llm.base import (
+    Effort,
+    LLMMessage,
+    LLMProvider,
+    LLMResponse,
+    LLMStream,
+    LLMToolCall,
+    LLMToolDefinition,
+    LLMToolMessage,
+    LLMToolResponse,
+    LLMUsage,
+)
 from app.core.config import settings
 from app.core.exceptions import UpstreamProviderError
 from app.core.logging import get_logger
@@ -41,6 +52,44 @@ def _output_config(effort: Effort | None) -> OutputConfigParam:
 
 def _to_anthropic_messages(messages: list[LLMMessage]) -> list[MessageParam]:
     return [MessageParam(role=m.role, content=m.content) for m in messages]
+
+
+def _to_anthropic_tool_messages(messages: list[LLMToolMessage]) -> list[MessageParam]:
+    converted: list[MessageParam] = []
+    pending_results: list[ToolResultBlockParam] = []
+    for message in messages:
+        if message.role == "tool":
+            if not message.tool_call_id or message.tool_calls:
+                raise ValueError("Tool results require a tool_call_id and cannot contain tool calls")
+            pending_results.append(
+                ToolResultBlockParam(
+                    type="tool_result", tool_use_id=message.tool_call_id, content=message.content
+                )
+            )
+            continue
+        if pending_results:
+            converted.append(MessageParam(role="user", content=list(pending_results)))
+            pending_results.clear()
+        if message.role not in ("user", "assistant"):
+            raise ValueError("Unsupported tool message role")
+        if message.tool_call_id is not None or message.tool_name is not None:
+            raise ValueError("Only tool results may contain tool result metadata")
+        if message.tool_calls:
+            if message.role != "assistant":
+                raise ValueError("Only assistant messages may contain tool calls")
+            blocks: list[TextBlockParam | ToolUseBlockParam] = []
+            if message.content:
+                blocks.append(TextBlockParam(type="text", text=message.content))
+            for call in message.tool_calls:
+                blocks.append(
+                    ToolUseBlockParam(type="tool_use", id=call.id, name=call.name, input=call.arguments)
+                )
+            converted.append(MessageParam(role="assistant", content=blocks))
+        else:
+            converted.append(MessageParam(role=message.role, content=message.content))
+    if pending_results:
+        converted.append(MessageParam(role="user", content=pending_results))
+    return converted
 
 
 def _usage_from_anthropic(usage: object) -> LLMUsage:
@@ -78,6 +127,55 @@ class AnthropicProvider(LLMProvider):
             timeout=settings.LLM_REQUEST_TIMEOUT_SECONDS,
         )
         self._model = settings.LLM_MODEL
+
+    async def generate_with_tools(
+        self,
+        *,
+        messages: list[LLMToolMessage],
+        tools: list[LLMToolDefinition],
+        system: str | None = None,
+        max_tokens: int | None = None,
+    ) -> LLMToolResponse:
+        """Translate the tool protocol without executing tools.
+
+        Thinking is disabled here because this minimal protocol does not
+        preserve thinking blocks. Existing text generation is unchanged.
+        """
+        tool_params = [
+            ToolParam(name=t.name, description=t.description, input_schema=t.input_schema)
+            for t in tools
+        ]
+        converted = _to_anthropic_tool_messages(messages)
+        try:
+            response = await self._client.messages.create(
+                model=self._model,
+                max_tokens=max_tokens or settings.LLM_MAX_TOKENS,
+                system=system or anthropic.omit,
+                messages=converted,
+                tools=tool_params if tools else anthropic.omit,
+                tool_choice={"type": "auto", "disable_parallel_tool_use": True} if tools else anthropic.omit,
+                thinking=_thinking_config(False),
+            )
+        except anthropic.APIError as exc:
+            logger.error("anthropic_tool_generate_failed", error=str(exc))
+            raise UpstreamProviderError(f"LLM provider error: {exc}") from exc
+
+        text_parts: list[str] = []
+        calls: list[LLMToolCall] = []
+        for block in response.content:
+            if block.type == "text":
+                text_parts.append(block.text)
+            elif block.type == "tool_use":
+                calls.append(LLMToolCall(id=block.id, name=block.name, arguments=block.input))
+            else:
+                raise ValueError(f"Unsupported tool response block: {block.type}")
+        return LLMToolResponse(
+            content="".join(text_parts),
+            model=response.model,
+            stop_reason=response.stop_reason,
+            tool_calls=calls,
+            usage=_usage_from_anthropic(response.usage),
+        )
 
     async def generate(
         self,

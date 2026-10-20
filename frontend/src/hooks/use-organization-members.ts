@@ -6,6 +6,7 @@ export function useOrganizationMembers(organizationId: string) {
   return useQuery({
     queryKey: ["organization-members", organizationId],
     queryFn: () => listOrganizationMembers(organizationId),
+    enabled: !!organizationId,
   });
 }
 

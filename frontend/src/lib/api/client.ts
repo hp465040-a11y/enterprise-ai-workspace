@@ -94,10 +94,11 @@ interface RequestOptions extends Omit<RequestInit, "body"> {
   body?: unknown;
   isFormData?: boolean;
   skipAuth?: boolean;
+  retryUnauthorized?: boolean;
 }
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { body, isFormData, skipAuth, headers, ...rest } = options;
+  const { body, isFormData, skipAuth, retryUnauthorized = true, headers, ...rest } = options;
 
   const doFetch = async (token: string | null): Promise<Response> => {
     const finalHeaders = new Headers(headers);
@@ -117,7 +118,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   const token = skipAuth ? null : await getValidAccessToken();
   let res = await doFetch(token);
 
-  if (res.status === 401 && !skipAuth) {
+  if (res.status === 401 && !skipAuth && retryUnauthorized) {
     const refreshed = await refreshAccessToken();
     if (refreshed) {
       res = await doFetch(refreshed);
