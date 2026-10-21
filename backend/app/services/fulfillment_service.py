@@ -68,6 +68,41 @@ def _compare(events: list[FulfillmentEvent], promise_type: str, actual_type: str
     return result
 
 
+def _allocation_evidence(events: list[FulfillmentEvent], shipment: dict) -> dict:
+    """Confirm an order-level block; require an explicit same-shipment link for delay cause."""
+    failures = [event for event in events
+                if event.event_type == "inventory_allocation_failed"
+                and event.external_event_id and event.tracking_number
+                and event.tracking_number.strip()]
+    by_id = {event.id: event for event in failures}
+    links = []
+    if shipment["status"] == "late" and shipment["tracking_number"]:
+        for event in events:
+            if event.event_type != "shipment_delay_attributed" or not event.external_event_id:
+                continue
+            failure = by_id.get(getattr(event, "caused_by_event_id", None))
+            if failure is None or event.source != failure.source:
+                continue
+            if event.tracking_number != shipment["tracking_number"] or failure.tracking_number != event.tracking_number:
+                continue
+            if not (_utc(failure.occurred_at) <= _utc(shipment["expected_at"])
+                    and _utc(shipment["expected_at"]) <= _utc(event.occurred_at)
+                    <= _utc(shipment["actual_at"])):
+                continue
+            links.append((event, failure))
+    linked = links[0] if len(links) == 1 else None
+    return {
+        "status": "blocked" if failures else "not_observed",
+        "failure_event_ids": [event.id for event in failures],
+        "failures": [{"event_id": event.id, "occurred_at": _utc(event.occurred_at),
+                      "source": event.source, "external_event_id": event.external_event_id,
+                      "tracking_number": event.tracking_number} for event in failures],
+        "causal_status": "linked_to_shipment_delay" if linked else "unknown",
+        "attribution_event_id": linked[0].id if linked else None,
+        "linked_failure_event_id": linked[1].id if linked else None,
+    }
+
+
 async def get_fulfillment_events(
     db: AsyncSession, *, organization_id: UUID, order_id: UUID,
     as_of: datetime | None = None,
@@ -109,6 +144,7 @@ def event_summary(e: FulfillmentEvent) -> dict:
         "occurred_at": _utc(e.occurred_at),
         "expected_at": _utc(e.expected_at) if e.expected_at is not None else None,
         "source": e.source, "external_event_id": e.external_event_id,
+        "caused_by_event_id": getattr(e, "caused_by_event_id", None),
         "tracking_number": e.tracking_number, "description": e.description,
     }
 
@@ -121,11 +157,13 @@ async def analyze_fulfillment(
     events = await get_fulfillment_events(
         db, organization_id=organization_id, order_id=order_id, as_of=as_of,
     )
+    shipment = _compare(events, "shipment_promised", "shipped", as_of)
     return {
         "order_id": order_id, "as_of": as_of, "scope": "order",
         "whole_order_completion": "unknown",
         "timeline": [event_summary(e) for e in events],
         "evidence_event_ids": [e.id for e in events],
-        "shipment": _compare(events, "shipment_promised", "shipped", as_of),
+        "shipment": shipment,
         "delivery": _compare(events, "delivery_promised", "delivered", as_of),
+        "allocation": _allocation_evidence(events, shipment),
     }

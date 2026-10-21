@@ -8,7 +8,7 @@ export interface InvestigationResponse {
   report: {
     outcome: "observed_delay" | "no_observed_delay" | "insufficient_evidence" | "not_found" | "invalid_input";
     evidence_event_ids: string[];
-    root_cause: "unknown";
+    root_cause: "unknown" | "inventory_allocation_blocked";
     knowledge_source_ids?: string[];
   };
   handoff: string;
@@ -16,6 +16,13 @@ export interface InvestigationResponse {
     whole_order_completion: string | null;
     shipment: TimingObservation | null;
     delivery: TimingObservation | null;
+    allocation: {
+      status: "blocked" | "not_observed";
+      causal_status: "linked_to_shipment_delay" | "unknown";
+      failure_event_ids: string[];
+      attribution_event_id: string | null;
+      linked_failure_event_id: string | null;
+    } | null;
   } | null;
 }
 
@@ -39,11 +46,16 @@ export interface InvestigationInput {
 export function investigateCase(
   organizationId: string,
   input: InvestigationInput,
+  onTransportStage?: (stage: "response_headers" | "json_parsed", status?: number) => void,
 ): Promise<InvestigationResponse> {
   return apiFetch<InvestigationResponse>(`/organizations/${organizationId}/investigations`, {
     method: "POST",
     body: input,
     retryUnauthorized: false,
+    ...(onTransportStage ? {
+      onResponseHeaders: (status: number) => onTransportStage("response_headers", status),
+      onJsonParsed: () => onTransportStage("json_parsed"),
+    } : {}),
   });
 }
 
@@ -64,10 +76,14 @@ export type InvestigationViewState =
   | { status: "success"; result: InvestigationResponse }
   | { status: "error"; message: string };
 
+class LocalReplayTimeoutError extends Error {}
+
 /** One click starts at most one investigation; the caller owns display state. */
 export function createInvestigationRunner(
   update: (state: InvestigationViewState) => void,
   request = investigateCase,
+  localReplayDeadlineMs?: number,
+  onDeadlineStage?: (stage: "timeout_armed" | "timeout_fired") => void,
 ) {
   let pending = false;
   return {
@@ -76,11 +92,26 @@ export function createInvestigationRunner(
       if (pending) return false;
       pending = true;
       update({ status: "pending" });
+      let timer: ReturnType<typeof setTimeout> | undefined;
       try {
-        update({ status: "success", result: await request(organizationId, input) });
+        const operation = request(organizationId, input);
+        const result = localReplayDeadlineMs === undefined ? await operation : await Promise.race([
+          operation,
+          new Promise<InvestigationResponse>((_, reject) => {
+            timer = setTimeout(() => {
+              onDeadlineStage?.("timeout_fired");
+              reject(new LocalReplayTimeoutError());
+            }, localReplayDeadlineMs);
+            onDeadlineStage?.("timeout_armed");
+          }),
+        ]);
+        update({ status: "success", result });
       } catch (error) {
-        update({ status: "error", message: investigationErrorMessage(error) });
+        update({ status: "error", message: error instanceof LocalReplayTimeoutError
+          ? "本地保存报告回放超过等待截止，页面未完成结果处理；未发起新的调查。"
+          : investigationErrorMessage(error) });
       } finally {
+        if (timer !== undefined) clearTimeout(timer);
         pending = false;
       }
       return true;

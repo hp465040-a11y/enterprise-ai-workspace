@@ -2,6 +2,23 @@
 
 The linked [redacted baseline summary](PROJECT_A_BASELINE_EVIDENCE.md) is commit-safe. Original `scripts/*.json`, `.jsonl` and logs cited by name are local-only and are not included in the repository. Run the evidence commands below from the repository root in PowerShell only when those local archives are available. They display existing results and make no model request or database change. The C05 fixture and ActionRequest test schemas were rolled back, so their IDs are **not** live records.
 
+## Historical real-result replay (current Graph)
+
+From the repository root, use the locally retained 2026-10-19 successful page report:
+
+```powershell
+node scripts/investigation_presentation_verify.cjs --preview
+Invoke-Item (Join-Path ([System.IO.Path]::GetTempPath()) 'project-a-investigation-saved-report-preview.html')
+```
+
+The preview shows the saved summary, Beijing-time comparison, six-part handoff, expandable evidence and copyable request ID. Its source `scripts/investigation_page_run_20261019T150109651854Z_eae597fa.json` is **local-only**, not included in Git. This is a **historical real-result replay**, not a new end-to-end acceptance of the current code or a new model call. The separate authenticated ActionRequest and internal-notification demonstration is described below; the report does not create an application automatically.
+
+## Saved allocation report in the actual React page
+
+With the retained isolated 3110/8125 services and local evidence available, run `node scripts/investigation_allocation_replay_proxy.cjs` once in a separate PowerShell window, then open `http://127.0.0.1:3111/login`. This loopback-only entry proxies the real login, organizations, workspaces and React assets. It requires a valid JWT and visible enterprise/workspace before returning the **saved** HTTP result for request `350b8943-4dcc-493f-b090-11b8076265e4`; it never forwards an investigation POST to 8125. The saved response and credentials live only in ignored local state/evidence files. Logging in at 3111 is necessary even if 3110 is already logged in, because browser storage is origin-specific.
+
+Log in as the existing demo member using the local `scripts/action_request_demo_state.json`, select the demo enterprise and `订单履约调查 SOP 演示` workspace, enter case ID `7beb2d8e-7ec6-4aef-b48e-3308a8881a21`, leave analysis time blank, enable required SOP retrieval and click once. The local relay rejects another case or workspace with 409. The user confirmed the saved response in the actual React page on 2026-10-22: `report_rendered` in about 163 ms in an earlier r4 check, conclusion/evidence visible, expansion working and full request ID copied. The user also confirmed the shortened r6 content and that the r7 submit button returns to “生成只读交接单” after the report displays. The r7 layout leaves the business summary and Beijing-time comparison visible by default; two closed sections reveal short handoff items or source counts, with complete handoff/SOP text, UUIDs and JSON in nested scrollable sections. This is an accepted **React saved-response replay**, not a new model run or live browser-to-model acceptance. Browser automation remains blocked by `CDP timeout: Page.enable`. Stop the relay with Ctrl+C in its own window after the check; do not delete the retained fixture.
+
 ## 1. Show the investigation report
 
 ```powershell

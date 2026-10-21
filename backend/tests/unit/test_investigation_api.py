@@ -184,8 +184,9 @@ class InvestigationAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(set(body), {"request_id", "organization_id", "case_id", "as_of",
                                      "report", "handoff", "observations"})
         observations = body["observations"]
-        self.assertEqual(set(observations), {"whole_order_completion", "shipment", "delivery"})
+        self.assertEqual(set(observations), {"whole_order_completion", "shipment", "delivery", "allocation"})
         self.assertEqual(observations["whole_order_completion"], "unknown")
+        self.assertIsNone(observations["allocation"])
         timing_fields = {"status", "scope", "tracking_number", "expected_at", "actual_at",
                          "difference_seconds", "reason"}
         self.assertEqual(set(observations["shipment"]), timing_fields)
@@ -210,6 +211,36 @@ class InvestigationAPITests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(internal, observations)
             self.assertNotIn(internal, observations["shipment"])
         self.assertEqual(body["case_id"], str(self.case_id))
+
+    async def test_linked_allocation_observation_is_scoped_public_projection(self):
+        failure_id, attribution_id = str(uuid4()), str(uuid4())
+        trace = [{"tool": "analyze_fulfillment", "result": {"status": "found", "analysis": {
+            "as_of": "2026-10-09T12:00:00Z", "whole_order_completion": "unknown",
+            "evidence_event_ids": [failure_id, attribution_id],
+            "shipment": {"status": "late", "scope": "shipment"},
+            "delivery": {"status": "unknown"},
+            "allocation": {
+                "status": "blocked", "causal_status": "linked_to_shipment_delay",
+                "failure_event_ids": [failure_id], "attribution_event_id": attribution_id,
+                "linked_failure_event_id": failure_id,
+                "failures": [{"event_id": failure_id, "secret": "PRIVATE_SOURCE"}],
+            },
+        }}}]
+        report = validate_report(json.dumps(evidence_contract(trace)), trace)
+        self.agent.return_value = CoreAgentResult(
+            render_report(report, trace), trace, 2, report.model_dump(mode="json"),
+            "PRIVATE_MODEL_RESPONSE", [{"content": "PRIVATE_PROMPT"}],
+        )
+        response = await self.post()
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body["report"]["root_cause"], "inventory_allocation_blocked")
+        self.assertEqual(body["observations"]["allocation"], {
+            "status": "blocked", "causal_status": "linked_to_shipment_delay",
+            "failure_event_ids": [failure_id], "attribution_event_id": attribution_id,
+            "linked_failure_event_id": failure_id,
+        })
+        self.assertNotIn("PRIVATE_", response.text)
 
     async def test_not_found_and_insufficient_evidence_are_completed_reports(self):
         for outcome in ("not_found", "insufficient_evidence"):

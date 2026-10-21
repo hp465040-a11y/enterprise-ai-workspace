@@ -220,18 +220,28 @@ class CoreKnowledgeTests(unittest.IsolatedAsyncioTestCase):
         first = requests[4].kwargs
         self.assertEqual(first["tools"], [])
         self.assertIn("Include ALL observed event IDs", first["system"])
-        self.assertIn("Keep these separate from evidence_event_ids", first["system"])
-        observations = [json.loads(m.content) for m in first["messages"] if m.role == "tool"]
+        if [m.role for m in first["messages"]] == ["user"]:
+            self.assertIn("keep retrieved chunk IDs", first["system"])
+            compact = json.loads(first["messages"][0].content.split("\n", 1)[1])
+            observations = [step["result"] for step in compact["verified_tool_observations"]]
+            self.assertEqual(set(compact["required_report_citations"]["evidence_event_ids"]), expected_ids)
+            self.assertEqual(compact["required_report_citations"]["knowledge_source_ids"], [str(self.chunk)])
+        else:
+            # This saved C05 sequence had an investigation rejection, so the clean-path
+            # compactor deliberately preserves its original complete message history.
+            observations = [json.loads(m.content) for m in first["messages"] if m.role == "tool"]
         self.assertTrue(any(set(o.get("analysis", {}).get("evidence_event_ids", [])) == expected_ids
                             for o in observations))
         self.assertTrue(any(o.get("sources") == [self.source] for o in observations))
         feedback = requests[5].kwargs["messages"][-1].content
-        marker = "missing_evidence_event_ids): "
-        missing, _ = json.JSONDecoder().raw_decode(feedback.split(marker, 1)[1])
+        marker = "Citation differences in your candidate: "
+        differences, _ = json.JSONDecoder().raw_decode(feedback.split(marker, 1)[1])
+        missing = differences["missing_evidence_event_ids"]
         self.assertEqual(missing, sorted(expected_ids - submitted_ids))
         self.assertEqual(len(missing), 3)
         self.assertNotIn(str(self.chunk), missing)
-        self.assertIn("cannot replace business event IDs", feedback)
+        self.assertEqual(differences["missing_knowledge_source_ids"], [])
+        self.assertIn("Business event IDs belong in evidence_event_ids", feedback)
         self.assertEqual(set(result.report["evidence_event_ids"]), expected_ids)
         self.assertEqual(result.report["knowledge_source_ids"], [str(self.chunk)])
         self.assertEqual(result.report["outcome"], "observed_delay")
@@ -317,7 +327,9 @@ class CoreKnowledgeTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(tool.input_schema["required"], ["query"])
             self.assertFalse(tool.input_schema["additionalProperties"])
             self.assertIn("SOP", tool.description)
-            self.assertIn("explicitly requires", request.kwargs["system"])
+            self.assertTrue("explicitly requires" in request.kwargs["system"] or
+                            any("required native SOP read" in message.content
+                                for message in request.kwargs["messages"]))
         feedback = requests[3].kwargs["messages"][-1].content
         self.assertIn("required next read is search_knowledge", feedback)
         self.assertNotIn("finish_investigation", feedback)
@@ -379,7 +391,7 @@ class CoreKnowledgeTests(unittest.IsolatedAsyncioTestCase):
     async def test_required_lookup_with_no_events_and_missing_case(self):
         self.analysis["evidence_event_ids"] = []
         responses = self.sequence(required=True)
-        responses[-1] = self.final([str(self.chunk)], evidence_event_ids=[])
+        responses[-1] = self.final(["K1"], evidence_event_ids=[])
         result = await self.run_sequence(responses, require_knowledge=True)
         self.assertEqual(result.report["outcome"], "insufficient_evidence")
         from app.core.exceptions import NotFoundError

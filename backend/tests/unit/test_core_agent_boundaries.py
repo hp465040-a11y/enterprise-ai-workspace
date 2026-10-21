@@ -230,8 +230,7 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
             self.assertIn(str(self.order_id), requests[1].kwargs["messages"][-1].content)
             self.assertIn("Cumulative verified facts:", requests[2].kwargs["messages"][-1].content)
             self.assertEqual({t.name for t in requests[2].kwargs["tools"]}, {
-                "get_exception_case", "analyze_fulfillment", "get_inventory_status",
-                "finish_investigation",
+                "get_inventory_status", "finish_investigation",
             })
             self.assertEqual(requests[3].kwargs["tools"], [])
             self.assertEqual(result.model_requests, 4)
@@ -275,7 +274,7 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                 requests = self.provider.generate_with_tools.call_args_list
                 for request in requests[:2]:
                     self.assertEqual({t.name for t in request.kwargs["tools"]}, all_tools)
-                expected = all_tools - {"get_fulfillment_events"}
+                expected = all_tools - {"get_exception_case", "analyze_fulfillment", "get_fulfillment_events"}
                 if source in ("none", "tracking_number"):
                     expected -= {"get_inventory_status"}
                 self.assertEqual({t.name for t in requests[2].kwargs["tools"]}, expected)
@@ -440,9 +439,11 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                 for request in requests[:2]:
                     self.assertEqual({tool.name for tool in request.kwargs["tools"]}, all_tools)
                 self.assertEqual({tool.name for tool in requests[2].kwargs["tools"]},
-                                 all_tools - {"get_fulfillment_events", "finish_investigation"})
+                                 all_tools - {"get_exception_case", "analyze_fulfillment",
+                                              "get_fulfillment_events", "finish_investigation"})
                 self.assertEqual({tool.name for tool in requests[3].kwargs["tools"]},
-                                 all_tools - {"finish_investigation"})
+                                 all_tools - {"get_exception_case", "analyze_fulfillment",
+                                              "finish_investigation"})
                 self.assertEqual(requests[4].kwargs["tools"], [])
                 self.assertIn("Final-only: no tools", requests[4].kwargs["system"])
 
@@ -651,15 +652,13 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                 self.call("get_inventory_status", {"sku": "Sku-A"}, "c"),
                 LLMToolResponse("FINISH", "stub", "stop"), LLMToolResponse(final, "stub", "stop"),
             ])
-            self.assertEqual(len(self.provider.generate_with_tools.call_args_list[3].kwargs["tools"]), 3)
+            self.assertEqual(len(self.provider.generate_with_tools.call_args_list[3].kwargs["tools"]), 1)
             correction = self.provider.generate_with_tools.call_args_list[3].kwargs
             feedback = correction["messages"][-1].content
             self.assertIn("required next read is get_inventory_status", feedback)
             self.assertNotIn("finish_investigation", feedback)
             self.assertNotIn("get_fulfillment_events", feedback)
-            self.assertEqual({t.name for t in correction["tools"]}, {
-                "get_exception_case", "analyze_fulfillment", "get_inventory_status",
-            })
+            self.assertEqual({t.name for t in correction["tools"]}, {"get_inventory_status"})
             inventory.assert_awaited_once()
             self.assertEqual(len(result.trace), 3)
             self.assertEqual(len(result.rejected_finals), 1)
@@ -685,8 +684,7 @@ class BoundaryTests(unittest.IsolatedAsyncioTestCase):
                 self.assertNotIn("finish_investigation", feedback)
                 self.assertNotIn("get_inventory_status", feedback)
                 self.assertEqual({t.name for t in correction["tools"]}, {
-                    "get_exception_case", "analyze_fulfillment", "get_inventory_status",
-                    "get_fulfillment_events",
+                    "get_inventory_status", "get_fulfillment_events",
                 })
                 self.assertEqual(self.events_count, 1)
                 self.assertEqual(result.report["outcome"], "insufficient_evidence")

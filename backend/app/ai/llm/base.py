@@ -68,6 +68,7 @@ class LLMToolResponse:
     stop_reason: str | None
     tool_calls: list[LLMToolCall] = field(default_factory=list)
     usage: LLMUsage = field(default_factory=LLMUsage)
+    server_timing_ns: dict[str, int] = field(default_factory=dict)
 
 
 class LLMStream(ABC):

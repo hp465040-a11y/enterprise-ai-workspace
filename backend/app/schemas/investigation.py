@@ -1,5 +1,6 @@
 """Public read-only investigation contract; internal traces are not exposed."""
 
+from typing import Literal
 from uuid import UUID
 
 from pydantic import AwareDatetime, BaseModel, ConfigDict, Field, StrictBool, model_validator
@@ -19,10 +20,19 @@ class TimingObservation(BaseModel):
     reason: str | None = None
 
 
+class AllocationObservation(BaseModel):
+    status: Literal["blocked", "not_observed"]
+    causal_status: Literal["linked_to_shipment_delay", "unknown"]
+    failure_event_ids: list[UUID]
+    attribution_event_id: UUID | None = None
+    linked_failure_event_id: UUID | None = None
+
+
 class InvestigationObservations(BaseModel):
     whole_order_completion: str | None = None
     shipment: TimingObservation | None = None
     delivery: TimingObservation | None = None
+    allocation: AllocationObservation | None = None
 
 
 def observations_from_trace(trace: list[dict]) -> InvestigationObservations | None:
@@ -36,6 +46,7 @@ def observations_from_trace(trace: list[dict]) -> InvestigationObservations | No
         "whole_order_completion": analysis.get("whole_order_completion"),
         "shipment": analysis.get("shipment"),
         "delivery": analysis.get("delivery"),
+        "allocation": analysis.get("allocation"),
     })
 
 

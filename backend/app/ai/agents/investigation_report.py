@@ -10,7 +10,7 @@ class EvidenceReport(BaseModel):
     model_config = ConfigDict(extra="forbid")
     outcome: Literal["observed_delay", "no_observed_delay", "insufficient_evidence", "not_found", "invalid_input"]
     evidence_event_ids: list[UUID]
-    root_cause: Literal["unknown"]
+    root_cause: Literal["unknown", "inventory_allocation_blocked"]
     knowledge_source_ids: list[UUID] = Field(default_factory=list)
 
     @model_serializer(mode="wrap")
@@ -51,7 +51,21 @@ def evidence_contract(trace: list[dict]) -> dict:
                    "no_observed_delay" if statuses == ["on_time", "on_time"] else "insufficient_evidence")
     else:
         outcome = "insufficient_evidence"
-    contract = {"outcome": outcome, "evidence_event_ids": sorted(events), "root_cause": "unknown"}
+    allocation = analyses[-1].get("allocation", {}) if analyses else {}
+    linked_ids = {str(allocation.get("attribution_event_id")),
+                  str(allocation.get("linked_failure_event_id"))}
+    linked = (allocation.get("status") == "blocked"
+              and allocation.get("causal_status") == "linked_to_shipment_delay"
+              and None not in (allocation.get("attribution_event_id"),
+                               allocation.get("linked_failure_event_id"))
+              and str(allocation.get("linked_failure_event_id")) in {
+                  str(event) for event in allocation.get("failure_event_ids", [])}
+              and allocation.get("attribution_event_id") != allocation.get("linked_failure_event_id")
+              and linked_ids <= {str(event) for event in events}
+              and analyses[-1].get("shipment", {}).get("status") == "late"
+              and outcome == "observed_delay")
+    contract = {"outcome": outcome, "evidence_event_ids": sorted(events),
+                "root_cause": "inventory_allocation_blocked" if linked else "unknown"}
     if any(s["tool"] == "search_knowledge" for s in trace):
         contract["knowledge_source_ids"] = sorted(knowledge_sources(trace))
     return contract
@@ -65,6 +79,8 @@ def validate_report(content: str, trace: list[dict]) -> EvidenceReport:
         raise ValueError("Missing, duplicate or invented event citations")
     if report.outcome != expected["outcome"]:
         raise ValueError("Outcome contradicts observations")
+    if report.root_cause != expected["root_cause"]:
+        raise ValueError("Root cause contradicts linked order evidence")
     knowledge_ids = [str(value) for value in report.knowledge_source_ids]
     if len(knowledge_ids) != len(set(knowledge_ids)) or not set(knowledge_ids) <= knowledge_sources(trace).keys():
         raise ValueError("Duplicate or unobserved knowledge citations")
@@ -75,8 +91,11 @@ def render_report(report: EvidenceReport, trace: list[dict]) -> str:
     """Render a validated report and its trace without new reads or model calls."""
     facts = [f"报告结论（Outcome: {report.outcome}）"]
     evidence = ["事件引用：" + (", ".join(str(v) for v in report.evidence_event_ids) or "无已观察事件引用")]
-    unknowns = ["根因未确认（Root cause: unknown）。",
-                "整单完成情况未知；发货/送达时间比较不证明整单履约正常或完成。"]
+    unknowns = ["整单完成情况未知；发货/送达时间比较不证明整单履约正常或完成。"]
+    if report.root_cause == "unknown":
+        unknowns.insert(0, "本次延迟根因未确认（Root cause: unknown）。")
+    else:
+        unknowns.insert(0, "该运单发货延迟有订单级库存分配受阻关联记录；送达及整单其他原因未确认。")
     gaps = []
     case_status = "未提供"
 
@@ -116,6 +135,26 @@ def render_report(report: EvidenceReport, trace: list[dict]) -> str:
                 gap("分析观察截止时间未提供。", "补充本次分析实际使用的 as_of，不以当前时间代替。")
             if not analysis.get("evidence_event_ids"):
                 unknowns.append("分析未提供事件引用；不能据此断言实际没有发货或送达。")
+            allocation = analysis.get("allocation") or {}
+            if allocation.get("status") == "blocked":
+                facts.append("该订单有明确的库存分配失败记录；这项事实本身不证明延迟原因。")
+                for failure in allocation.get("failures", []):
+                    evidence.append(
+                        f"分配失败事件 {shown(failure.get('event_id'))}：发生时间 "
+                        f"{shown(failure.get('occurred_at'))}；来源 {shown(failure.get('source'))}；"
+                        f"来源记录号 {shown(failure.get('external_event_id'))}；"
+                        f"运单 {shown(failure.get('tracking_number'))}。"
+                    )
+                if report.root_cause == "inventory_allocation_blocked":
+                    facts.append("结构化关联记录确认该运单发货延迟与库存分配受阻有关。")
+                    evidence.append(
+                        f"延迟关联事件 {shown(allocation.get('attribution_event_id'))} "
+                        f"明确关联分配失败事件 {shown(allocation.get('linked_failure_event_id'))}。"
+                    )
+                else:
+                    unknowns.append("分配失败已记录，但缺少满足订单、运单与时间边界的明确延迟关联；因果仍未知。")
+                    gap("该运单发货延迟与已记录分配失败之间的明确关联资料未提供。",
+                        "核对分配系统与履约系统的同运单关联记录及事件时间。")
             for kind, label in (("shipment", "发货"), ("delivery", "送达")):
                 comparison = analysis.get(kind, {})
                 status = comparison.get("status")

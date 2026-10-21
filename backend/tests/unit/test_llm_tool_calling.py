@@ -118,9 +118,8 @@ class ToolCallingProtocolTests(unittest.IsolatedAsyncioTestCase):
             LLMToolMessage(role="tool", content="Missing ID"),
             LLMToolMessage(role="user", tool_calls=[LLMToolCall(id="a", name="get_order", arguments={})]),
         ):
-            with self.subTest(role=message.role):
-                with self.assertRaises(ValueError):
-                    await self.provider.generate_with_tools(messages=[message], tools=[self.definition])
+            with self.subTest(role=message.role), self.assertRaises(ValueError):
+                await self.provider.generate_with_tools(messages=[message], tools=[self.definition])
         self.client.messages.create.assert_not_awaited()
 
     async def test_no_tools_omits_tools_and_choice(self):
@@ -229,7 +228,9 @@ class OllamaToolCallingTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_schema_system_options_and_final_text(self):
-        self.respond({"content": "Done"}, prompt_eval_count=10, eval_count=5)
+        self.respond({"content": "Done"}, prompt_eval_count=10, eval_count=5,
+                     total_duration=100, load_duration=20,
+                     prompt_eval_duration=30, eval_duration=40)
         response = await self.call(system="Support", max_tokens=100)
         payload = self.client.post.call_args.kwargs["json"]
         self.assertEqual(self.client.post.call_args.args, ("/api/chat",))
@@ -243,6 +244,10 @@ class OllamaToolCallingTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(response.content, "Done")
         self.assertEqual(response.usage.input_tokens, 10)
         self.assertEqual(response.usage.output_tokens, 5)
+        self.assertEqual(response.server_timing_ns, {
+            "total_duration": 100, "load_duration": 20,
+            "prompt_eval_duration": 30, "eval_duration": 40,
+        })
 
     async def test_call_and_result_roundtrip_without_native_ids(self):
         arguments = {"order_number": "DAY3-TEST-001", "platform": "amazon"}
@@ -277,6 +282,20 @@ class OllamaToolCallingTests(unittest.IsolatedAsyncioTestCase):
             self.respond({"tool_calls": [{"function": {"name": "get_order", "arguments": arguments}}]})
             with self.assertRaises(ValueError):
                 await self.call()
+
+    async def test_short_knowledge_call_parses_with_decision_cap(self):
+        from app.ai.tools.knowledge_tool import SearchKnowledgeInput
+
+        query = "What does the fulfillment SOP say about allocation failure delaying shipment?"
+        native = {"function": {"name": "search_knowledge", "arguments": {"query": query}}}
+        self.assertLess(len(json.dumps(native, ensure_ascii=True).encode("ascii")), 256)
+        self.respond({"content": "", "tool_calls": [native]})
+        response = await self.call(tools=[LLMToolDefinition(
+            "search_knowledge", "Look up SOP", SearchKnowledgeInput.model_json_schema(),
+        )], max_tokens=256)
+        self.assertEqual(self.client.post.call_args.kwargs["json"]["options"]["num_predict"], 256)
+        self.assertEqual(response.stop_reason, "tool_use")
+        self.assertEqual(SearchKnowledgeInput.model_validate(response.tool_calls[0].arguments).query, query)
 
     async def test_invalid_correlation_fails_before_http(self):
         call = LLMToolCall("a", "get_order", {"order_number": "A100"})
@@ -322,15 +341,17 @@ class OllamaToolCallingTests(unittest.IsolatedAsyncioTestCase):
             await self.call()
 
     async def test_customer_agent_roundtrip_with_ollama_adapter(self):
-        from datetime import datetime, timezone
+        from datetime import UTC, datetime
         from decimal import Decimal
+
         from sqlalchemy.ext.asyncio import AsyncSession
+
         from app.ai.agents.customer_agent import run_customer_agent
 
         order = SimpleNamespace(
             order_number="DAY3-TEST-001", platform="amazon", store_key="day3-test-store",
             status="confirmed", payment_status="paid", fulfillment_status="unfulfilled",
-            currency="USD", total_amount=Decimal("12.00"), ordered_at=datetime.now(timezone.utc),
+            currency="USD", total_amount=Decimal("12.00"), ordered_at=datetime.now(UTC),
         )
         self.respond({"content": "", "tool_calls": [{"function": {
             "name": "get_order", "arguments": {

@@ -95,10 +95,13 @@ interface RequestOptions extends Omit<RequestInit, "body"> {
   isFormData?: boolean;
   skipAuth?: boolean;
   retryUnauthorized?: boolean;
+  onResponseHeaders?: (status: number) => void;
+  onJsonParsed?: () => void;
 }
 
 export async function apiFetch<T>(path: string, options: RequestOptions = {}): Promise<T> {
-  const { body, isFormData, skipAuth, retryUnauthorized = true, headers, ...rest } = options;
+  const { body, isFormData, skipAuth, retryUnauthorized = true, onResponseHeaders,
+    onJsonParsed, headers, ...rest } = options;
 
   const doFetch = async (token: string | null): Promise<Response> => {
     const finalHeaders = new Headers(headers);
@@ -124,6 +127,7 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
       res = await doFetch(refreshed);
     }
   }
+  onResponseHeaders?.(res.status);
 
   if (!res.ok) {
     const error = await parseErrorBody(res);
@@ -133,7 +137,9 @@ export async function apiFetch<T>(path: string, options: RequestOptions = {}): P
   if (res.status === 204) {
     return undefined as T;
   }
-  return (await res.json()) as T;
+  const result = (await res.json()) as T;
+  onJsonParsed?.();
+  return result;
 }
 
 export { API_BASE_URL };

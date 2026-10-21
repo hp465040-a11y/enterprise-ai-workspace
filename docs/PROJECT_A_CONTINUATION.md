@@ -922,3 +922,147 @@ Changed backend/app/schemas/investigation.py, backend/app/api/v1/endpoints/inves
 The only resume baseline reviewed was the user-designated V2.0 one-page file dated 10.18 under D:/1.[personal folder]/jianli; no resume file was modified or exported. The five proposed Project A bullets cover current LangGraph Core orchestration, authorized SOP retrieval with separate event/source citations, enterprise/workspace permissions, ActionRequest approval/idempotent transactions, and scoped Celery document ingestion. Keep the existing project title/date and one-sentence business overview; personal information and employment content were untouched. Delete unsupported resume claims of a Redis lock or a general concurrency limiter; describe the actual PostgreSQL unique key, row locks, task deadlines and bounded Agent requests instead. Keep internal notification records distinct from external delivery.
 
 README's Project A section now separates 2026-10-19 controlled Graph parity (11 scenarios; 90 related offline tests recorded in the prior handoff), the 2026-10-18 legacy-loop real C05, 2026-10-19 current-Graph real browser report, C10 isolated retrieval with controlled chat Provider, 21 targeted isolated PostgreSQL ActionRequest tests plus JWT HTTP evidence, and one real isolated Celery success/failure/duplicate run. Counts from different methods or versions are not combined. New report-layout visual/expand/copy behavior, full scenario matrix, persistent Graph recovery, and external notification delivery remain unverified or absent. No model, database, test suite or migration was run for this resume/documentation turn.
+
+## 2026-10-20 订单库存分配受阻调查最小闭环（未提交）
+
+当前基线 7c9e736 已由用户推送；保留原有未提交的 frontend/next-env.d.ts、frontend/tsconfig.json 及演示数据。本轮没有调用聊天模型、运行场景矩阵、改动业务库或提交推送。旧报告契约只允许 root_cause=unknown；库存快照仅属组织/SKU 线索，不能证明某订单缺货或造成延迟。现新增订单关联的 `inventory_allocation_failed` 事件，以及明确引用该失败事件的 `shipment_delay_attributed` 事件；两者有发生时间、来源记录号、运单和既有订单/企业范围。只有发货确实晚于承诺，且关联事件与失败事件同来源、同运单、同订单/企业、符合承诺/发货时间边界并且关联唯一时，Service 才标为 `linked_to_shipment_delay`，报告契约才允许 `inventory_allocation_blocked`；仅有失败记录时只确认“分配受阻已记录”，延迟原因仍为 unknown。负库存不归因规则保留；不宣称具体欠货数量、送达或整单根因。固定事件均为合成验收数据，不是生产案例。
+
+变更范围：`backend/app/models/fulfillment_event.py`、`backend/alembic/versions/0008_order_allocation_evidence.py`、`backend/app/services/fulfillment_service.py`、`backend/app/ai/agents/{investigation_report,core_agent,core_graph}.py`、`backend/app/schemas/investigation.py`，以及调查页的 API 类型、展示、回放脚本和直接相关测试。原 API 输入、预算、阶段边界和知识引用契约未放宽；报告保留六部分交接单，把失败事实、引用与时间、未确认的因果、对应建议（尚未执行）分开显示。展示使用结构化 `observations.allocation`，不解析中文报告；旧响应仍可显示。0008 只在隔离随机 schema 测试，未迁移业务库；在已有旧 schema 上部署新 ORM 前必须按正常变更流程应用 0008，受保护演示库本轮不变。
+
+验证：2026-10-20 定向离线单测先有 99 项通过（含受控 Provider 的 Graph/旧循环新场景、来源与时间边界、负库存旧规则）；新增 HTTP 投影用例单独 1 项通过；最后收紧关联时间边界后再跑直接相关 42 项，全部通过。隔离 PostgreSQL `ragforge_day6_test` 测试在收紧时间边界前通过 1 方法、模型建表/0008 迁移两个子场景，真实查询验证早于关联时点不归因、同订单关联可用及跨企业/订单引用不归因；测试辅助器回滚后确认随机 schema 不存在。收紧边界后的再次 PG 连接被拒（现有 `.env` 凭据认证失败，未创建 schema），故该最终微调只有离线验证，不把先前 PG 通过说成最终源码的完整 PG 验收。固定响应前端回放、typecheck、定向 ESLint、Ruff、`git diff --check` 通过。回放与数据库测试均非真实模型/浏览器验收；新根因场景尚无真实模型或页面手工验收，也没有生产来源事件接入。本轮不标记个人学习 PASS。
+
+## 2026-10-20 分配受阻调查收口：隔离 PG 认证阻塞
+
+本轮未改源码、测试、报告契约或演示数据。定向核对 `scripts/day6_verify.py`、`scripts/action_request_verify.py`、`backend/tests/commerce/test_day6_postgres.py` 和 Compose：目标固定为宿主 `localhost:5433`、库 `ragforge_day6_test`、用户 `ragforge`；配置由根 `.env` 读取，再由同名进程环境变量覆盖，本轮进程无 `POSTGRES_USER`/`POSTGRES_PASSWORD` 覆盖。使用当前 `.env` 值的最终版定向 PG 复核在认证前被服务拒绝，原始异常为 `password authentication failed for user "ragforge"`；未进入建 schema 或迁移阶段，不能据此断言最终版 PG 通过。Codex 内 Docker 只读查询被 `C:\Users\xingk\.docker\config.json: Access is denied` 和 Docker API named pipe `permission denied` 阻断，不能核对容器当前凭据；不误判 Docker 引擎停止，也不推断密码为什么变化。不重试、不重置密码、不改 `.env`。本轮未创建临时 schema/collection/Redis key/进程；此前隔离 PG 通过轮次的随机 schema 已由测试辅助器核实回滚。报告及页面只把分配失败列为订单事实，明确关联才说该运单发货延迟有关，整单/其他原因仍未确认，建议标注尚未执行；措辞检查无须修改。剩余：用有效的隔离 PG 凭据完成最终源码的单项定向 PG 复核；真实模型、浏览器及生产来源事件接入仍未验收。未 commit/push，本人学习不标 PASS。
+
+## 2026-10-20 用户本机完成最终版隔离 PG 复核
+
+用户在普通 PowerShell 用本项目现有 postgres 容器凭据运行 `test_order_allocation_postgres.OrderAllocationPostgresTests.test_model_and_migration_support_real_scoped_causal_read`，反馈原始终端结果 `Ran 1 test in 1.536s`、`OK`、退出码 0；本轮 Codex 未重跑，也没有单独归档终端日志。源码核对：1 个 unittest 方法内部含 `models` 和 `migration` 两个 subTest，后者在临时 schema 对旧 0002/0003 结构应用 0008；两者均在 `ragforge_day6_test` 中写入合成承诺、发货、分配失败和明确延迟关联事件，验证关联事件尚未进入观察时点时因果未知、进入后同订单运单延迟可关联，并用另一企业/订单引用原企业失败事件验证不能跨范围归因。共享 Day6 测试辅助器先校验数据库名，在随机 `day6_test_*` schema 内运行，finally 回滚事务、查询 `pg_namespace` 断言 schema 已不存在，并 dispose engine；由于整个方法 OK，两轮均通过这些清理断言。未额外执行独立的运行后残留普查。
+
+相对已推送基线 7c9e736，本轮未提交源码新增了订单级分配失败/延迟关联事件及 0008、保守的履约 Service 归因、Graph/旧循环报告契约与六部分交接单措辞、只读 API 观察字段及调查页展示，并有离线与隔离 PG 定向测试。仅记录“该运单发货延迟有明确关联”，不称整单或唯一根因；仅有失败事件、库存快照或 SOP 仍不能归因。原受保护演示库和业务库未迁移。剩余验收：将真实来源事件接入后验证数据真实性，在已按正常流程应用 0008 的隔离页面环境进行真实模型/浏览器路径验收；本轮不执行这些步骤，不运行全矩阵，不 commit/push。本人学习不标 PASS。
+
+## 2026-10-21 分配调查单轮性能收口
+
+原页面请求 `e4430dbb-e536-480d-a1a9-401431997ccf` 的前两轮模型分别用 100.187、106.281 秒，第三轮在 Graph 的 180 秒截止；工具合计仅 0.078 秒。历史响应未存 Ollama token/加载/输入处理/生成计数，Provider 原先丢弃服务端时长。现已让 Ollama Tool Response 保留白名单性能计数并由隔离 runner 记录；历史证据不补写。原第三轮单轮探针 `scripts/investigation_allocation_latency_probe_e4430dbb.json` 在 180.312 秒截止。
+
+优化仅移除已成功读取且固定范围不可重复的案件/分析工具定义，Graph 与旧循环保持一致；完整业务观察、必需 SOP 工具、权限/预算/报告校验不变。离线重建第三轮由 3 工具降为仅 `search_knowledge`，请求体 12321→11207 字节；本机 GGUF tokenizer 加 Ollama 模板估算提示约 3569 token，运行上下文 4096、输出上限 700，完整预留输出时输入预算 3396，故不能声称 700 token 输出余量充足。无 SKU 及待办库存/事件读取，SOP 仍待检索。直接相关的 Graph/知识/Provider 47 项、边界 47 项及更新断言 2 项离线通过；这不等于真实提速。
+
+本轮唯一优化后第三轮单轮探针 `scripts/investigation_allocation_optimized_probe_e4430dbb.json` 使用同一模型/参数/180 秒截止，在 180.281 秒再次截止，未返回工具调用或服务端性能计数；与原探针相差 0.031 秒，不能据单次截止比较认定改善。探针期间 Ollama 显示 `llama3.1:8b` Q4_K_M、4096 上下文、约 15% CPU/85% GPU，GTX 1650 Ti 一次采样 99% 利用率；历史请求当时的设备分配未知。未调用调查 API、业务工具或数据库，未动隔离演示数据，也未重跑完整场景。停止同配置探针；下一候选是仅对调查决策阶段评估较低 `num_predict`，以释放 4096 上下文的输出余量，代价是可能截断合法工具参数，须在后续受控验证中核对；最终报告上限和验收规则不变。本轮未实施该候选，不下载模型、不提高超时，不标个人学习 PASS。
+
+## 2026-10-21 调查决策轮 256-token 单次探针
+
+Provider 的 `max_tokens` 会传至 Ollama `options.num_predict`；此前 Core 两阶段均未单独传值。本轮只让调查决策轮显式传 256，报告轮仍使用原默认上限；Graph 与旧循环一致，180 秒截止、工具/引用/权限/预算规则不变。离线重建第三轮仍有完整 7 条消息和必需 `search_knowledge`，代表性合法原生调用为 147 ASCII 字节（仅证明该短调用有输出空间，非服务端 token 实测；任意长查询不作保证）。定向 Graph/Provider 检查分别运行 4 项与 14 项，均通过；截断响应在执行知识工具前拒绝。生产代码、Graph 回放和探针脚本 Ruff/语法检查通过；Provider 测试文件全量 Ruff 仍有 3 条既存、与本轮新增用例无关的样式提示。
+
+唯一探针证据 `scripts/investigation_allocation_decision_256_probe_e4430dbb.json`：同一 `llama3.1:8b`、7 消息、只提供 SOP 工具，`num_predict=256`、180 秒截止，180.265 秒超时；无模型响应、工具调用或服务端 token/耗时计数。先前 700-token 优化探针为 180.281 秒超时，两次均被相同截止截断，不能判定提速或原因；本轮不具备单次完整场景验收条件。未发起调查 API、检索或数据库访问，演示数据未改。停止同配置探针。下一候选是定向压缩第三轮重复的决策说明文本（保留全部观察、SOP 权限和证据规则），为 4096 上下文留输入余量；代价是需要离线对照防止改变模型决策，且没有服务端阶段计数前不能保证提速。未实施该候选，未提高超时、换模型或重跑完整调查；本人学习不标 PASS。
+
+## 2026-10-21 第三轮决策上下文精简与单次探针
+
+先前最小工具对照 `scripts/investigation_allocation_run_minimal_tool_probe_e4430dbb.json` 用同 Provider/模型/256 输出上限，以 207 输入、29 输出 token 在 27.547 秒返回合法原生 `search_knowledge`；服务端输入处理 13.541 秒。本轮仅对干净的“案件读取→履约分析→必需 SOP 待检索”第三轮建立临时精简请求：保留完整原始 trace 和报告阶段历史，模型本轮收到系统规则及一条明确标记为不可信工具数据的用户消息，内含企业/案件/订单/分析时点、原请求和两项未删字段的观察；跳过已有原生调用外壳与重复决策说明。Graph 和旧循环共用构造，检索工具、服务端权限及报告校验不变。真实失败样本离线逐字段比对两项观察完全一致，6 个业务事件 ID、分配关联/运单/时间均保留；消息合法，且只提供 `search_knowledge`。Graph/旧循环 14 项、边界 47 项及最后两项定向断言通过；恶意观察文本仍为数据，模拟跳过必需检索被服务端拒绝。替身不能证明真实模型行为等价。
+
+唯一精简探针 `scripts/investigation_allocation_compact_probe_e4430dbb.json` 未执行真实工具：请求由 7 条消息、11207 字节降为 2 条、7483 字节；同一 `llama3.1:8b`、`num_predict=256`、180 秒截止，146.859 秒返回可解析的原生 `search_knowledge`，服务端计数为输入 2187、输出 29 token；总时长 146.596 秒，其中加载 10.442、输入处理 130.631、生成 5.514 秒。此前第三轮两次均在约 180 秒截止且无服务端计数，不能用单次结果推断稳定提速。返回查询针对运单延迟，但没有点明库存分配失败；真实知识命中、引用与最终报告尚未验证。可安排一次完整验收尝试，先做常规依赖/隔离数据预检，不保证结果通过；本轮未调用调查 API、检索、数据库或完整场景，未改演示数据，也未提交推送。本人学习不标 PASS。
+当前 8125 隔离 API 于本次源码变更前启动，serve() 未开启 reload；后续真实页面验收前须先按现有方式重启该隔离 API 并核对服务加载新版代码。本轮未重启。
+
+## 2026-10-21 单次完整验收预检阻断
+已核对保存状态中的 allocation_demo 案件、工作区、collection 标识与旧失败记录；受 PG 凭据限制，本轮尚未完成在线资源预检。8125/3110 仍在运行，未见本任务活跃调查或 Ollama 请求。新版第三轮上下文尚未加载到旧 8125。Codex 沙箱执行本项目 Docker 查询返回 config.json Access is denied 和 docker_engine named pipe permission denied；本进程无隔离 PG 凭据，因此未停止旧 API、未重复试失效 .env，也未发起调查。新增 scripts/restart_investigation_allocation_api.ps1：普通 PowerShell 中只读容器身份/端口/隔离依赖/保留数据后仅重启本轮 8125，保留 3110 与演示数据；语法通过。新增 scripts/investigation_allocation_http_once.py：服务就绪后用现有成员认证、保存状态及 3110 代理仅提交一次，POST 前写固定路径防重复标记；语法/Ruff 通过但尚未运行。需用户在普通 PowerShell 执行重启脚本并返回 READY，之后 Codex 执行该唯一 HTTP 提交、读取 runner 轨迹和验收；当前没有本轮模型/数据库写入，未宣称通过，不标个人学习 PASS。
+
+## 2026-10-21 订单分配受阻场景单次真实 Graph/API 验收
+用户在普通 PowerShell 启动脚本确认 8125 READY（新 PID 35060），3110 保留；隔离 PG、Redis、Qdrant、原案件/6 条事件/SOP collection 预检通过。提交前本轮防重标记不存在、无活跃同任务请求。随后仅运行一次 `scripts/investigation_allocation_http_once.py`，使用保存状态中的 case_id `7beb2d8e-7ec6-4aef-b48e-3308a8881a21`、workspace_id `61730353-ee16-470b-916e-7c3b5117875f`、as_of `2026-10-20T18:37:15.004234+00:00`、`require_knowledge=true`，经 3110 代理进入当前 Graph；防重标记和客户端响应保存于 `scripts/investigation_allocation_run_http_client_20261021.json`。
+
+结果 **未通过**：request_id `2b4100f8-8fc2-41f5-ac77-35695c4ae23e`，HTTP 502、`error_code=model_timeout`，Graph 耗时 513.282 秒（客户端 514.125 秒）。工具路径 `get_exception_case(found) → analyze_fulfillment(found) → search_knowledge(found)`；报告阶段 `final_only` 已进入，但第 4 次模型请求在单轮 180.016 秒截止时取消，未返回报告；690 秒总截止未触发。无报告拒绝记录，也无六部分交接单或可供无模型回放的成功报告。逐轮模型耗时 90.609、112.453、127.062、180.016 秒；前三轮有服务端计数，第四轮没有。原始证据 `scripts/investigation_allocation_run_20261020T200910720967Z_e78899e0.json` 及同名 `.jsonl`；直接验收 `scripts/investigation_allocation_acceptance.json` 为 `passed=false`，业务/知识路径、知识命中、阶段及订单分配关联检查通过，报告/引用/限定措辞检查因报告缺失未通过。
+
+分析工具返回同一运单发货晚 3600 秒、送达早 3600 秒，订单级分配失败事件与明确延迟关联事件均在六条业务证据内；其 `causal_status=linked_to_shipment_delay` 仅支持该运单发货延迟关联，不代表整单或唯一根因。SOP 单独以授权 chunk 命中，但没有最终报告，故业务事件与 SOP 来源的报告引用无法验收。该调查轨迹只有只读工具，未执行处置或发送通知。本轮未新建或清理隔离演示资源，保留原数据、服务及全部失败证据；没有自动重试、修复、提交或推送。API 验收失败，浏览器展示未验收；本人学习不标 PASS。
+
+## 2026-10-21 报告轮上下文精简与唯一探针
+针对 request_id `2b4100f8-8fc2-41f5-ac77-35695c4ae23e`，仅复用 `scripts/investigation_allocation_run_20261020T200910720967Z_e78899e0.json` 的三项真实工具结果，不重查数据库/检索、不运行调查前三轮。原证据记录第 4 轮进入 report 后 180.016 秒取消，但未持久化第 4 轮完整模型请求、其输入 token 或服务端计数；历史精确输入不可恢复。当前源码推导的干净报告轮带原始 user/assistant/tool 调用外壳及重复提示。仅在三项读取均成功、消息角色/工具顺序匹配、没有报告纠错的分支，改为一条含完整 scope、原请求和三项原样观察的 user 数据消息；系统仍保留原报告契约，报告工具列表为空、原 4096 输出上限及 180 秒外层截止不变。修改 `backend/app/ai/agents/core_agent.py`、`backend/app/ai/agents/core_graph.py`；新增 `scripts/investigation_allocation_report_probe.py`。
+
+离线检查 `scripts/investigation_allocation_report_compaction_check_20261021.json` 通过：当前源码重建的线缆消息 9→2 条、UTF-8 JSON 7510→5971 字节（不是历史真实 token 计数）；三项完整观察、六条业务事件 ID 与一条独立 SOP chunk ID 均保留。直接调用 Graph 决策节点的受控 Provider 检查确认走精简报告分支、无工具、max_tokens=None（由当前配置映射为 4096）。原校验器对完整预期结构通过，对漏掉业务引用、伪造 SOP 来源和错误根因均拒绝；Ruff 与语法检查通过。
+
+唯一模型探针 `scripts/investigation_allocation_report_probe_20261021.json`：`llama3.1:8b`、输入线缆 5971 字节、外层 180 秒、无工具；本地 Provider 的 `LLM_REQUEST_TIMEOUT_SECONDS=120`；120.29 秒返回 `UpstreamProviderError`，与该 HTTP 截止吻合，但底层 HTTP 异常子类未保存，未取得报告或服务端 token/耗时计数，不能判定 180 秒内模型是否会返回。探针证据原样保存，不再试跑、未放宽校验或预算、未调用调查 API/业务工具、未改演示数据。此项未通过保存观察的报告轮验证，更非完整 E2E 或浏览器验收；下次试验前须先核对探针与实际 API 的 Provider HTTP 截止是否一致，并确认服务端该请求是否仍在执行，不据此推断模型性能。未 commit/push，本人学习不标 PASS。
+
+## 2026-10-21 报告轮探针配置对齐与单次结果
+定向确认配置来源：`scripts/investigation_allocation_demo.py:serve` 调用 `configure`，进而复用 `scripts/investigation_page_demo.py:configure`，在创建 OllamaProvider 前将 `LLM_REQUEST_TIMEOUT_SECONDS=190`、`LLM_MAX_TOKENS=700` 写入进程内 settings；Provider 构造在 `backend/app/ai/llm/ollama_provider.py` 从该 settings 创建 HTTP client，并把报告轮的 `max_tokens=None` 映射为 700。此前独立探针绕过演示 configure，使用 `.env`/默认 120 秒与 4096；旧证据仅保存 `UpstreamProviderError`，底层异常子类未保存，不能仅凭 120.29 秒定论。Graph 单轮 180 秒及演示 runner 总 690 秒未改。本轮无法读取已运行 8125 进程环境（CIM Access denied），但启动代码路径和真实前三轮 127 秒返回与 190 配置一致；不宣称已直接读取运行进程的内存参数。
+
+修订 `scripts/investigation_allocation_report_probe.py`，在独立进程复用同一演示 configure、记录有效 HTTP/输出参数和异常链类型；不连接业务库或检索。离线对齐检查 `scripts/investigation_allocation_report_aligned_check_20261021.json` 通过：保存的三项完整真实观察、六条业务事件 ID 与一条 SOP chunk ID 不丢；报告线缆 2 条/5971 字节（字节数非 token）；当前配置为 190/700、Graph 单轮 180。唯一对齐模型探针 `scripts/investigation_allocation_report_aligned_probe_20261021.json`：`llama3.1:8b` 返回，耗时 178.007 秒，未超时、无工具调用、stop_reason=stop；服务端输入 1908、输出 126 token，总 177.716 秒，其中加载 22.015、输入处理 129.254、生成 26.397 秒。模型调用无异常链；原 `validate_report` 抛 `ValueError: Missing, duplicate or invented event citations`，状态 `report_rejected`。报告未校验通过，也未生成六部分交接单。探针当时未保存被拒候选 JSON，故无法确定具体缺失/重复/伪造的 ID；随后仅修正探针今后的响应留存和独立 SOP/六部分检查，未再调用模型。脱敏复核见 `scripts/investigation_allocation_report_aligned_review_20261021.json`，Ruff/语法检查通过。
+
+本轮只验证保存观察的报告轮，未重查 PG/Qdrant、未运行完整调查、未改原演示数据或其他模型配置。报告轮仍未通过；下一次完整 Graph/API 及浏览器验收均待有效报告后另行进行，不能把本探针称作 E2E。未 commit/push，本人学习不标 PASS。
+
+## 2026-10-21 保存观察的报告阶段引用纠错单次验证
+仅复用 `scripts/investigation_allocation_run_20261020T200910720967Z_e78899e0.json` 中的案件、履约分析和成功 SOP 检索三项原始观察；未连接 PG/Qdrant、未重跑调查前三轮。原报告精简消息包含完整观察，却未单列六条必引业务事件 ID 和独立 SOP chunk ID；原 Graph 报告反馈只明确漏引事件，未分列重复、未观察 ID 与 SOP 差异。本轮在 `backend/app/ai/agents/core_agent.py` 的报告数据消息中加入从原 `evidence_contract(trace)` 计算的 `required_report_citations`，不补写模型输出；报告纠错反馈列出候选的 missing/duplicate/unobserved 两类引用差异，并保持原契约与缺完成时间提示。`backend/app/ai/agents/core_graph.py` 复用该反馈，未放宽校验、预算、权限或因果边界。
+
+`scripts/investigation_allocation_report_probe.py` 新增直接调用当前 Graph 报告决策/校验节点的受控报告阶段入口：每轮先落盘原始模型响应，再解析候选 JSON 和调用原 `validate_report`，保存差异、反馈、耗时及异常链类型；最多首答加一次纠错，单轮 180 秒、阶段 690 秒，实际 Provider 190 秒、报告 num_predict 700。原三项读取后的模型预算计数从 3 起，最多两轮，不越过原 9 次上限。原始候选文件用 `.gitignore` 中精确规则只留本地，不含凭据；不覆盖历史失败证据。离线检查 `scripts/investigation_allocation_report_stage_check_20261021.json` 通过：必引 6+1 列表精确、完整观察不丢，漏引/重复/未观察和 SOP 差异反馈准确；受控替身回放证实 Graph 漏引→一次纠错→合格报告，Ruff/语法通过。
+
+唯一真实报告阶段验证 `scripts/investigation_allocation_report_stage_probe_20261021.json`：首轮 167.580 秒服务端总耗时，输入 2100/输出 126 token；候选为 `observed_delay`、`inventory_allocation_blocked`，引用一条 SOP 来源，但仅引用六条必需业务事件中的两条。原校验器拒绝，准确差异为缺少 4 条业务事件、无重复或未观察 ID。原始响应、解析候选及包含 4 个缺失 ID 的反馈均已保存。第二轮仅一次纠错请求，因 Graph 180 秒单轮截止返回 `model_timeout`，异常链类型 `CoreAgentError → TimeoutError → CancelledError`；没有第二份模型响应或服务端计数。第二轮按现有 Graph 纠错路径发送了 10 条消息、9164 UTF-8 字节（包含历史工具调用外壳），这是本次已记录的后续耗时线索，不能断言唯一原因。报告阶段合计 347.907 秒，未触及 690 秒上限，无合格报告或六部分交接单、无可用回放。未追加模型调用、未修改演示数据、未 commit/push；完整 Graph/API 与浏览器验收仍待完成，本人学习不标 PASS。
+
+## 2026-10-21 报告纠错上下文一致化与实验状态
+仅修改 `backend/app/ai/agents/core_agent.py`、`backend/app/ai/agents/core_graph.py` 的当前 Graph 报告纠错消息选择：在三项成功且结构匹配的保存观察路径中，首答仍用一条完整、标注为不可信工具数据的精简消息；一次报告拒绝后复用同一观察消息，只追加被拒候选和原校验差异反馈。若历史结构或反馈不匹配则退回原路径，不删除证据、不补写引用、不修改原 validator、权限、9 次请求预算、180 秒单轮或 690 秒总截止。测试入口 `scripts/investigation_allocation_report_probe.py stage-compaction-check` 使用保存的三项真实观察与受控 Provider，验证首答消息角色 `user`、纠错角色 `user/assistant/user`、两轮同一完整观察、6 条业务与 1 条 SOP 来源均保留；错误首答被拒，纠正后完整报告通过，连续错误报告仍为 `ungrounded_final`。证据 `scripts/investigation_allocation_report_stage_compaction_check_20261021.json`；Ruff/语法检查通过。未调用模型、数据库或检索，未重跑完整调查。
+
+`README.md` 将新增“订单库存分配受阻调查”单独标为 **Experimental / 实验中**：合成数据上的 Service/隔离 PG 与离线验证已通过，真实授权 SOP 检索成功，但最终报告引用校验和完整 Graph/API、浏览器验收未通过。原有已通过调查主线及全部失败证据保持原样。要形成可演示的新场景，仍需未来一次真实报告通过原业务与 SOP 引用校验并生成六部分交接单，再完成单次完整 Graph/API 和页面展示验收；本轮没有宣称模型行为等价或 E2E 通过。未 commit/push，本人学习不标 PASS。
+
+## 2026-10-21 当前版本收尾：离线回归与演示边界
+
+订单库存分配受阻仍为实验中：合成订单级证据的 Service、隔离 PG 与离线契约已有通过记录，真实 SOP 检索成功；最终报告引用校验、完整 Graph/API 和浏览器验收未通过。本轮没有调用模型、运行完整场景或改变原始失败证据。
+
+公共 Core/Graph 定向离线回归首轮运行 93 项，其中 83 项通过、10 项因旧测试固定要求历史消息外壳或旧反馈文字而失败；测试断言改为保留结果、工具序列、预算、拒绝记录及权限边界校验，同时允许当前已验证的精简消息结构。仅复核受影响的 40 项：先通过 39 项，修正一项对历史回退路径的预期后单独通过该项；这是分次定向结果，不称一次 93 项全绿。另有调查 API/Provider 相关 40 项通过，覆盖认证与工作区边界、响应脱敏及工具协议。此前 `scripts/investigation_allocation_report_stage_compaction_check_20261021.json` 的离线报告纠错检查复用，未重跑。相关 Ruff、`git diff --check` 和 README/演示/交接的相对链接检查通过。
+
+`docs/PROJECT_A_DEMO.md` 增加“历史真实结果回放”入口：使用本地保存的 2026-10-19 当前 Graph 成功报告，经 `node scripts/investigation_presentation_verify.cjs --preview` 生成无 API/模型/数据库访问的本地 HTML；源 JSON 仅本地留存。申请创建、管理员审核和站内通知记录的独立演示步骤继续保留，站内记录不代表外部发送或客户收悉。回放不算当前代码新增 E2E。提交范围应只取本轮源码、迁移、直接相关测试、演示脚本与文档；排除原始 JSON/JSONL/日志、凭据、演示状态、虚拟环境及 Next 生成的 `frontend/next-env.d.ts`/`frontend/tsconfig.json`，另有 `backend/tests/commerce/test_day6_postgres.py` 仅换行变化，不纳入。未 commit/push，本人学习不标 PASS。
+
+## 2026-10-21 保存观察的报告阶段单次复验（纠错后仍失败）
+
+复用 request_id `2b4100f8-8fc2-41f5-ac77-35695c4ae23e` 的三项真实观察、既有离线通过证据 `scripts/investigation_allocation_report_stage_compaction_check_20261021.json` 与原 `validate_report`；未重查业务库或 SOP、未重跑离线测试或完整调查。预检未见连接 Ollama 的活跃客户端，`/api/ps` 无已加载模型。探针将本次证据另存为仅本地的 `scripts/investigation_allocation_report_stage_post_compaction_20261021.json`，没有覆盖上次失败。为使异常轮也有耗时记录，探针仅补 `finally` 计时；Ruff 通过。实际 Provider `llama3.1:8b`、HTTP 190 秒、报告输出上限 700，Graph 单轮 180 秒、报告阶段 690 秒，首答前已有 3 次模型请求；本阶段最多两次，没有自动重启。
+
+首答使用一条精简的 `user` 消息、无工具，163.407 秒返回；服务端输入/输出 2100/126 token。候选 `observed_delay / inventory_allocation_blocked`，六条必需业务事件仅引两条，独立 SOP 引用正确；原校验器拒绝，四条缺失 ID 和反馈已保存。唯一纠错轮使用 `user/assistant/user`，其中复用原完整观察、附被拒候选与准确差异；77.820 秒返回，服务端输入/输出 2691/181 token。候选仍为相同限定结论、独立 SOP 引用正确，但仅引四条业务事件，仍缺两条；无重复或伪造 ID。原校验器最终返回 `ungrounded_final`，异常链 `CoreAgentError → ValueError`。阶段耗时 241.257 秒，两轮均未触发 180 秒超时，原始响应、解析候选、差异和服务端计数均在新证据中。失败属于**引用遗漏且一次纠错未补全**，不是本次生成超时；没有合格报告、六部分交接单或新场景回放，完整 Graph/API、浏览器仍未验收。未追加模型调用、放宽校验、自动补引用、commit/push；本人学习不标 PASS。
+
+## 2026-10-21 报告阶段短编号引用验证（仅保存观察）
+
+对照本地两份失败候选：六条必引事件均在完整分析观察中，分别对应发货、送达、分配失败及延迟关联；首答引 2/6，纠错引 4/6，漏引并非输入缺少事件。仅在当前 Graph 的精简报告阶段为已观察业务事件建立 E1…En、检索来源建立独立 K1…Kn；消息保留完整原观察、企业/订单/运单范围、来源、时间和关联，在映射旁标明事件摘要。模型仅提交短编号，服务端严格检查缺失、未知、重复、类型混用或直接提交 UUID，再还原为 UUID 交原 `validate_report`；不自动补引用、不改变 API 报告或归因契约。首答与一次纠错复用同一确定性映射，原始候选与映射只在本地探针证据中保存。调查工具、权限、预算和截止未改。
+
+新增离线检查 `scripts/investigation_allocation_report_short_refs_check_20261021.json` 通过：6 个 E、1 个 K 的有效映射经原校验器和六部分渲染通过；漏事件、漏 SOP、未知编号、重复、业务/SOP 混用及直接 UUID 共 9 类坏候选均拒绝；受控 Graph 首答拒绝→一次纠错使用同一映射并通过。随后直接相关 Graph/知识离线回归 40 项通过，映射来源元数据微调后复核相关单项通过；Ruff 与差异格式检查通过。未重跑旧离线检查。
+
+唯一真实报告阶段验证复用 request_id `2b4100f8-8fc2-41f5-ac77-35695c4ae23e` 已保存的三项真实观察，不重读 PG/Qdrant、不重跑完整调查。新本地证据 `scripts/investigation_allocation_report_stage_short_refs_20261021.json` 记录首轮无工具、E1–E6/K1 原始候选、映射、空引用差异、UUID 还原后的合格报告及六部分交接单；首答即通过，未用纠错。结果 `observed_delay / inventory_allocation_blocked`，限定为该运单发货延迟与分配受阻有关，整单其他原因未确认，建议未执行。实际模型请求 1 次、耗时 178.352 秒（接近 Graph 单轮 180 秒），服务端输入/输出 2299/64 token；该单次通过不证明稳定性。仅标“保存观察的报告阶段通过”，完整 Graph/API 与浏览器验收仍待完成；未 commit/push，本人学习不标 PASS。
+## 2026-10-21 库存分配受阻完整验收预备与环境阻断
+
+读取 `scripts/investigation_allocation_report_stage_short_refs_20261021.json`：保存观察的报告阶段首答通过，UUID 报告含六条业务事件与独立 SOP 来源，六部分交接单限定为该运单发货延迟关联、整单其他原因未确认、建议未执行；这仍非完整 Graph/API 结果。用当前 `investigationPresentation` 和该保存报告、原分析观察运行 `node scripts/investigation_presentation_verify.cjs --preview --allocation-stage-preview`，通过摘要（发货晚 1 小时、送达早 1 小时）、限定归因及六部分渲染检查，生成本地 `project-a-allocation-saved-report-preview.html`；这是 Node/HTML 无模型回放，不是浏览器交互验收。短编号 Graph 首答和纠错共用映射的既有受控检查继续有效，严格还原后仍由原 `validate_report` 验证。
+
+为下一次唯一完整验收，隔离 runner 新增报告轮原始候选、解析 JSON、引用差异的本地 JSONL/快照记录，保留逐轮与工具耗时；客户端防重复证据改用新文件名，避免覆盖前次失败。受控 Provider 记录检查通过，Ruff 与差异检查通过。8125/3110 页面和 API 端口可用，保存的隔离状态仍指向 `ragforge_day6_test`、原案件/工作区；但 8125 进程早于短编号源码改动，尚不能用于新版完整验收。Codex 内 `docker compose ps -q postgres` 被本机 Docker config 及 named pipe `Access is denied / permission denied` 拒绝，不能按现有安全脚本读取本项目 PG 凭据并重启 8125；不误判 Docker 引擎停止，不修改权限或凭据。已请用户在普通 PowerShell 运行 `powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\restart_investigation_allocation_api.ps1` 并回复 READY 或原始错误。当前新防重复文件不存在，**没有发起新的完整调查或模型请求**；完整 Graph/API 与浏览器展示待新版 API READY 后再按唯一一次原则执行。未 commit/push。
+
+## 2026-10-21 库存分配受阻完整 Graph/API 单次验收
+
+用户在普通 PowerShell 重启隔离 8125 后报告 READY（PID 10464），3110 保留。新进程启动晚于 core_agent.py/core_graph.py 的短编号改动；本次报告模型实际返回 E1–E6/K1，服务端还原为六条事件 UUID 与独立 SOP chunk UUID，确认新逻辑生效。只运行一次 scripts/investigation_allocation_http_once.py，使用保留的隔离案件、工作区、准确 as_of 和 require_knowledge=true；HTTP 200，request_id 350b8943-4dcc-493f-b090-11b8076265e4，客户端耗时 490.797 秒，无自动重试。原始本地证据：scripts/investigation_allocation_run_http_short_refs_20261021.json、scripts/investigation_allocation_run_20261021T131249224570Z_b4543abf.json 及同名 JSONL；验收摘要：scripts/investigation_allocation_run_acceptance_short_refs_20261021.json。原始轨迹与候选仅本地保留，不作为公开仓库链接。
+
+实际 Graph 工具路径为 get_exception_case → analyze_fulfillment → search_knowledge，均 found；成功检索后进入 final_only 报告阶段。四轮模型耗时分别为 90.719、113.516、118.875、163.594 秒；工具耗时分别为 0.032、0.031、3.093 秒；本次无报告拒绝或纠错，引用差异全空。分析观察包含同企业订单/运单的分配失败来源及时间、独立的延迟关联事件，限定结论为该运单发货延迟与库存分配受阻有关；发货晚 1 小时、送达早 1 小时，整单其他原因及完成情况未知。原校验器通过 observed_delay / inventory_allocation_blocked、六条业务事件和一条独立 SOP 引用；六部分交接单完整，工具轨迹无处置或通知执行。单次通过不代表稳定率，也不是生产案例。
+
+investigation_allocation_demo.py verify 初次仅因脚本中第五部分标题少“逐项”而误报；只将验收脚本标题对齐现有渲染器后，重读同一结果的全部 13 项检查通过，没有重新调用模型。node scripts/investigation_presentation_verify.cjs --preview --allocation-api-preview 复用这份 HTTP 响应通过当前前端展示逻辑的摘要、时间、限定归因、六部分及证据折叠检查，生成本地 file:///C:/Users/xingk/AppData/Local/Temp/project-a-allocation-saved-report-preview.html；这是无模型静态回放，浏览器实际交互尚待人工查看，不能标为浏览器端到端通过。原演示数据保留，未 commit/push；本人学习不标 PASS。
+
+## 2026-10-21 分配受阻页面回放与提交范围复核
+
+复用 request_id 350b8943-4dcc-493f-b090-11b8076265e4 的完整 HTTP 响应，没有调用模型或重新调查。原有静态 HTML 回放只验证共享展示映射，不是 React 页面。为手工验收新增本地回环入口 scripts/investigation_allocation_replay_proxy.cjs（3111 → 现有 3110）：真实登录/JWT、企业和工作区读取照常进行；仅匹配保留案件、工作区、必需 SOP 的调查 POST 在认证后返回保存结果，其他案件返回 409，未登录返回 403，绝不转发调查 POST。定向 HTTP 核对 login=200、matching replay=200、unauth=403、wrong case=409，回放页 GET=200；未输出凭据。浏览器自动化唯一一次 CDP 检查再次在 Page.enable 超时，保留临时 profile，不继续排障。故当前只能记“React 页面回放入口就绪、实际交互待人工验收”，不能把静态预览或代理 HTTP 检查记成 React 展示通过；具体手工步骤在 docs/PROJECT_A_DEMO.md。
+
+README 验收表和 docs/PROJECT_A_BASELINE_EVIDENCE.md 新增 2026-10-21 后基线条目，注明完整 Graph/API 单次 HTTP 200、490.797 秒、首答 E1–E6/K1 引用齐全且无纠错、合成隔离数据、无稳定率及浏览器通过结论。相对已推送 7c9e736，必要变更为 0008 迁移、事件模型/履约 Service/公开观察、Core/Graph/Provider 与原校验规则、前端限定展示、直接相关测试、隔离 runner/启动与本地回放脚本、上述文档和本地证据忽略规则；依赖的 action_request_demo.py、investigation_page_demo.py、knowledge_retrieval_verify.py、0007 迁移均已在基线跟踪。排除 .venv-d4、原始 JSON/JSONL/log、演示状态、CDP profile、frontend/next-env.d.ts、frontend/tsconfig.json 和仅有换行差异的 test_day6_postgres.py。复用此前 40 项离线、42 项订单级离线及用户本机 1 项隔离 PG 结果；本轮新增本地入口 Node 语法/HTTP 守卫检查和相关前端 typecheck、定向 ESLint 均通过；34 个候选文件的定向密钥模式扫描无命中，差异格式检查通过，未跑全矩阵。React 展开/复制/时间视觉仍待手工验收；在文档准确保留此限制且白名单检查通过时，源码可作为单次 Graph/API 结果提交。不 commit/push，本人学习不标 PASS。
+
+## 2026-10-21 3111 回放页面停在调查中：定向核查与本地代理修正
+
+用户报告在 3111 提交保存报告回放后页面长时间显示“调查中”。只读核查：本地代理旧会话曾记录 saved_response_served，说明至少一次请求通过认证和案件/工作区匹配；但旧日志没有时间及 response finish，无法把该记录无歧义地归给用户点击，也不能确认旧响应已送达浏览器。8125 最近日志仅有 21:20:59 完成的原 Graph 调查 POST（request_id 350b8943-4dcc-493f-b090-11b8076265e4），没有新增调查 POST；latest 仍指向该已完成结果，相关端口无活跃等待连接。没有新模型请求或待停真实调查。前端源码请求相对 /api/v1，3110 演示启动配置 NEXT_PUBLIC_API_URL 为空；原浏览器网络细节因 CDP 故障未能直接采集。现有证据排除新 8125 模型运行，旧停点只能限定在代理响应送达或浏览器状态更新，不能武断归因。
+
+仅修 scripts/investigation_allocation_replay_proxy.cjs：保存响应设置明确 Content-Length；对经 3111 的所有 investigation POST 设本地拦截边界，未知路径直接 409、不转发；记录脱敏的 host/path、HTTP 状态、完成耗时及未完成断开，不记录 JWT 或正文。确认原 3111 无活跃连接后只重启本地代理，未动 3110/8125。新入口 http://127.0.0.1:3111/investigations，代理 PID 15012。真实 JWT 定向 HTTP 回放在 420 ms 返回 200、5427 字节、原 request_id 和六条事件；新代理 finish 记录 host=127.0.0.1:3111、path 为企业调查 POST、耗时 414 ms。8125 latest 和调查 POST 日志保持不变。另用保存响应对前端 createInvestigationRunner 做无 API 的受控状态回放，pending → success 通过。上述不等于用户浏览器交互通过；须在 3111 刷新后手工再看页面，CDP 不再重试，本人学习不标 PASS。
+
+## 2026-10-22 React 保存响应回放确认与展示收尾
+
+用户手工确认 3111 的 r4 实际 React 页：保存响应 request_id `350b8943-4dcc-493f-b090-11b8076265e4` 到达 `report_rendered` 约 163 ms；调查结论和证据可见，证据能展开，完整请求标识复制正确。此项记为**实际 React 页的保存响应回放通过**，与 2026-10-21 的单次真实 Graph/API HTTP 200、490.797 s 分开；未发生新的浏览器到模型实时 E2E。随后 r5 仅调整布局：默认展示由结构化观察计算的发货晚 1 小时、送达早 1 小时、该运单延迟与分配受阻关联、整单完成及其他原因未知、未执行处置；原六部分交接单和技术证据分别折叠，原文区域 `translate=no`，完整引用与复制保留。保存响应及源码中均无“发送到达”“库存配置失败”“可疑交接单”或弯引号；浏览器翻译来源未证实，不改历史证据。具体资料缺口未列出时明确“不表示资料齐全”，页面不自动生成建议。
+
+`node scripts/investigation_presentation_verify.cjs --preview --allocation-api-preview` 的保存响应/React 布局契约检查、前端 `npm run typecheck`、页面与展示映射定向 ESLint 均退出码 0；静态 HTML 只作回放辅助，不作为 React 浏览器证据。r5 新折叠布局的视觉确认仍待用户查看；r4 已确认的展开与复制不需重验。原始 JSON/JSONL、演示状态和凭据继续仅本地保留；本轮未调用模型、迁移业务库、commit/push，本人学习不标 PASS。
+
+## 2026-10-22 调查报告 r6 末次展示精简
+
+r5 的两个外层 `<details>` 源码均无 `open`，默认收起；用户反馈展开后原文仍使页面过长。r6 继续只改展示：默认仅留业务摘要和北京时间对比；展开六部分交接单先见六条由结构化报告/观察生成的短节，完整原文在第二层；展开技术证据先见六条业务事件、一条 SOP 来源和业务观察类型概览，完整 ID、JSON 及含 SOP 内容的原交接单在第二层。全文区限制高度并内部滚动，保留 `translate=no`、请求 ID 复制及原文逐字内容；未解析原文补造建议，未知事项和未执行状态仍明确展示。API、调查、权限和校验器未改。
+
+保存的同一 HTTP 响应通过 `node scripts/investigation_presentation_verify.cjs --preview --allocation-api-preview`，检查四个详情均默认关闭、六短节/来源概览/完整内容位置、无默认 UUID 及滚动样式；前端 typecheck 和页面/展示映射定向 ESLint 均退出码 0。静态预览不算实际 React 浏览器通过；r6 视觉只待一次人工确认，r4 已验展开与复制不重验。上轮 34 个明确文件白名单仍覆盖本次所有修改，尚未执行暂存、commit/push；未调用模型，本人学习不标 PASS。
+
+## 2026-10-22 r6 报告可见但提交按钮仍显示调查中
+
+用户确认同一次 3111 保存响应回放已到 `state_committed_success` 和 `report_rendered`，随后没有新的 `submit_started` 或 `pending`；残留“调查中”的是提交按钮，不是报告状态。源码核对：按钮文字与 `disabled`、报告区域都读同一个 `view.status`；共享 Button 组件仅透传原生 button 属性，没有单独状态或缓存。因而可确认浏览器按钮 DOM 与已提交的 React 状态脱节；是否由浏览器翻译或开发热更新引起仍未知，不能据此归咎模型或代理。只在状态切换时用 key 重建提交按钮，并给按钮设置 `translate=no`；本地面板在成功提交后追加 `submit_button_ready` / `submit_button_mismatch`，不记录正文或凭据。r6 的报告层级和调查 API/校验器未改，页面脚本标记 r7。
+
+复用同一保存响应运行 `node scripts/investigation_presentation_verify.cjs --preview --allocation-api-preview`：实际页面组件离线渲染验证 pending 按钮禁用、success/error 按钮恢复并可点击，success 同时有报告且无等待提示；原 runner 完成后再等待，状态仍为 success、按钮仍可点击。前端 typecheck、页面/诊断定向 ESLint 及差异空白检查通过；这些是离线检查，r7 实际浏览器按钮尚待确认。未调用模型、重试 CDP、暂存、commit/push，本人学习不标 PASS。
+
+## 2026-10-22 Project A 本轮功能冻结与页面最终验收
+
+用户已手工确认 3111 的 r7 保存响应回放：报告出现后按钮恢复“生成只读交接单”；连同先前确认的报告展示、r6 精简布局、证据展开和完整请求标识复制，保存响应的实际 React 页面交互验收完成，等待状态能退出。此结果仅是已有 HTTP 结果的浏览器回放；真实 Graph/API 仍只对应 2026-10-21 的一次 HTTP 200、490.797 秒、六条业务事件及独立 SOP 引用的合成隔离场景，不合并成新增实时浏览器到模型 E2E 或稳定率。页面布局与功能至此冻结；原始运行证据和演示状态仍只留本地，本人学习不标 PASS。

@@ -23,6 +23,8 @@ class FulfillmentEventType(StrEnum):
     IN_TRANSIT = "in_transit"
     DELIVERED = "delivered"
     DELIVERY_FAILED = "delivery_failed"
+    INVENTORY_ALLOCATION_FAILED = "inventory_allocation_failed"
+    SHIPMENT_DELAY_ATTRIBUTED = "shipment_delay_attributed"
 
 
 class FulfillmentEvent(Base, UUIDPKMixin):
@@ -30,7 +32,8 @@ class FulfillmentEvent(Base, UUIDPKMixin):
     __table_args__ = (
         CheckConstraint(
             "event_type IN ('shipment_promised', 'delivery_promised', 'shipped', "
-            "'in_transit', 'delivered', 'delivery_failed')", name="ck_fulfillment_events_type",
+            "'in_transit', 'delivered', 'delivery_failed', 'inventory_allocation_failed', "
+            "'shipment_delay_attributed')", name="ck_fulfillment_events_type",
         ),
         CheckConstraint(
             "(event_type IN ('shipment_promised', 'delivery_promised') AND expected_at IS NOT NULL) "
@@ -40,6 +43,17 @@ class FulfillmentEvent(Base, UUIDPKMixin):
         CheckConstraint("btrim(source) <> ''", name="ck_fulfillment_events_source_nonempty"),
         CheckConstraint("btrim(description) <> ''", name="ck_fulfillment_events_description_nonempty"),
         CheckConstraint("btrim(external_event_id) <> ''", name="ck_fulfillment_events_external_id_nonempty"),
+        CheckConstraint(
+            "(event_type = 'shipment_delay_attributed' AND caused_by_event_id IS NOT NULL) "
+            "OR (event_type <> 'shipment_delay_attributed' AND caused_by_event_id IS NULL)",
+            name="ck_fulfillment_events_causal_reference",
+        ),
+        CheckConstraint(
+            "event_type NOT IN ('inventory_allocation_failed', 'shipment_delay_attributed') "
+            "OR (external_event_id IS NOT NULL AND tracking_number IS NOT NULL "
+            "AND btrim(tracking_number) <> '')",
+            name="ck_fulfillment_events_allocation_provenance",
+        ),
         Index(
             "uq_fulfillment_events_external_id", "organization_id", "order_id", "source",
             "external_event_id", unique=True,
@@ -61,6 +75,9 @@ class FulfillmentEvent(Base, UUIDPKMixin):
     source: Mapped[str] = mapped_column(String(128), nullable=False)
     external_event_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
     tracking_number: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    caused_by_event_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("fulfillment_events.id", ondelete="RESTRICT"), nullable=True
+    )
     description: Mapped[str] = mapped_column(Text, nullable=False)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False

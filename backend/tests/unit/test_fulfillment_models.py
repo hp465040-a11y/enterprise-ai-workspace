@@ -7,7 +7,7 @@ from pathlib import Path
 
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
-from sqlalchemy import CheckConstraint, UniqueConstraint
+from sqlalchemy import UniqueConstraint
 from sqlalchemy.dialects import postgresql
 from sqlalchemy.orm import configure_mappers
 from sqlalchemy.schema import CreateIndex, CreateTable
@@ -35,7 +35,8 @@ class FulfillmentModelTests(unittest.TestCase):
         })
         self.assertEqual(set(FulfillmentEvent.__table__.columns.keys()), {
             "id", "organization_id", "order_id", "event_type", "occurred_at",
-            "expected_at", "source", "external_event_id", "tracking_number", "description", "created_at",
+            "expected_at", "source", "external_event_id", "tracking_number", "description",
+            "caused_by_event_id", "created_at",
         })
         for model in (ExceptionCase, FulfillmentEvent):
             self.assertIs(Base.metadata.tables[model.__tablename__], model.__table__)
@@ -99,6 +100,10 @@ class FulfillmentModelTests(unittest.TestCase):
             ddl = str(CreateTable(table).compile(dialect=dialect))
             for line in ddl.splitlines():
                 line = line.strip().rstrip(",")
+                if model is FulfillmentEvent and ("caused_by_event_id" in line
+                    or "ck_fulfillment_events_type" in line
+                    or "ck_fulfillment_events_allocation_provenance" in line):
+                    continue  # These are introduced by 0008, not the historical 0003 snapshot.
                 if line and not line.startswith("CREATE TABLE") and line != ")":
                     self.assertIn(line, sql)
             for index in table.indexes:
@@ -111,6 +116,28 @@ class FulfillmentModelTests(unittest.TestCase):
             self.migration.downgrade()
         self.assertEqual(buffer.getvalue().strip(),
                          "DROP TABLE fulfillment_events;\n\nDROP TABLE exception_cases;")
+
+    def test_order_allocation_migration_has_typed_reference_and_reversible_ddl(self):
+        path = Path(__file__).resolve().parents[2] / "alembic/versions/0008_order_allocation_evidence.py"
+        spec = importlib.util.spec_from_file_location("allocation_migration", path)
+        migration = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(migration)
+        self.assertEqual(migration.down_revision, "0007_customer_notifications")
+        buffer = io.StringIO()
+        context = MigrationContext.configure(dialect_name="postgresql", opts={
+            "as_sql": True, "output_buffer": buffer,
+        })
+        with Operations.context(context):
+            migration.upgrade()
+        sql = buffer.getvalue()
+        for marker in ("ADD COLUMN caused_by_event_id", "FOREIGN KEY", "inventory_allocation_failed",
+                       "shipment_delay_attributed", "ck_fulfillment_events_allocation_provenance"):
+            self.assertIn(marker, sql)
+        buffer.seek(0)
+        buffer.truncate()
+        with Operations.context(context):
+            migration.downgrade()
+        self.assertIn("DROP COLUMN caused_by_event_id", buffer.getvalue())
 
 
 if __name__ == "__main__":

@@ -11,16 +11,24 @@ accepted for interface compatibility and otherwise ignored here.
 """
 
 import json
-from typing import Any
-from uuid import uuid4
 from collections.abc import AsyncIterator
 from contextlib import AbstractAsyncContextManager, asynccontextmanager
+from typing import Any
+from uuid import uuid4
 
 import httpx
 
 from app.ai.llm.base import (
-    Effort, LLMMessage, LLMProvider, LLMResponse, LLMStream, LLMUsage,
-    LLMToolCall, LLMToolDefinition, LLMToolMessage, LLMToolResponse,
+    Effort,
+    LLMMessage,
+    LLMProvider,
+    LLMResponse,
+    LLMStream,
+    LLMToolCall,
+    LLMToolDefinition,
+    LLMToolMessage,
+    LLMToolResponse,
+    LLMUsage,
 )
 from app.core.config import settings
 from app.core.exceptions import UpstreamProviderError
@@ -175,6 +183,9 @@ class OllamaProvider(LLMProvider):
                 input_tokens=data.get("prompt_eval_count", 0),
                 output_tokens=data.get("eval_count", 0),
             ),
+            server_timing_ns={key: value for key in (
+                "total_duration", "load_duration", "prompt_eval_duration", "eval_duration",
+            ) if isinstance((value := data.get(key)), int) and not isinstance(value, bool)},
         )
 
     async def generate(
