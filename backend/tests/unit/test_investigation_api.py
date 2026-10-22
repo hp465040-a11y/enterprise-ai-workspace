@@ -2,6 +2,7 @@
 
 import json
 import unittest
+from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -39,6 +40,21 @@ class InvestigationAPITests(unittest.IsolatedAsyncioTestCase):
             return SimpleNamespace(scalar_one_or_none=lambda: member)
 
         self.db.execute.side_effect = membership_query
+
+        @asynccontextmanager
+        async def separate_session():
+            yield self.db
+        self.start_patch("app.api.v1.endpoints.investigations.async_sessionmaker",
+                         return_value=separate_session)
+        async def reserve_stub(_db, **kwargs):
+            now = datetime.now(UTC)
+            return SimpleNamespace(id=uuid4(), as_of=kwargs["as_of"] or now,
+                                   deadline_at=now + timedelta(seconds=690)), True
+        self.reserve = self.start_patch("app.api.v1.endpoints.investigations.runs.reserve",
+                                        new_callable=AsyncMock,
+                                        side_effect=reserve_stub)
+        self.finish = self.start_patch("app.api.v1.endpoints.investigations.runs.finish",
+                                       new_callable=AsyncMock, return_value=True)
 
         async def offline_db():
             yield self.db
@@ -89,6 +105,51 @@ class InvestigationAPITests(unittest.IsolatedAsyncioTestCase):
         self.db.delete.assert_not_awaited()
         self.db.flush.assert_not_awaited()
         self.db.commit.assert_not_awaited()
+
+    async def test_duplicate_running_submission_returns_status_without_second_model_call(self):
+        now = datetime.now(UTC)
+        run = SimpleNamespace(
+            id=uuid4(), organization_id=self.org, requested_by_user_id=self.user_id,
+            case_id=self.case_id, workspace_id=None, as_of=now, status="running",
+            deadline_at=now + timedelta(seconds=690), created_at=now,
+            finished_at=None, error_code=None, response=None,
+        )
+        self.reserve.side_effect = None
+        self.reserve.return_value = (run, False)
+        self.start_patch("app.api.v1.endpoints.investigations.runs.expire",
+                         new_callable=AsyncMock)
+        self.start_patch("app.api.v1.endpoints.investigations.runs.authorized_run",
+                         new_callable=AsyncMock, return_value=run)
+        response = await self.post(extra_headers={"Idempotency-Key": "same-submission"})
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json()["status"], "running")
+        self.assertEqual(response.json()["id"], str(run.id))
+        self.assertIsNone(response.json()["result"])
+        self.agent.assert_not_awaited()
+        self.factory.assert_not_called()
+
+    async def test_duplicate_saved_report_uses_original_validated_response(self):
+        now = datetime.now(UTC)
+        original = {"run_id": str(uuid4()), "request_id": str(uuid4()),
+                    "organization_id": str(self.org), "case_id": str(self.case_id),
+                    "as_of": now.isoformat(), "report": self.agent.return_value.report,
+                    "handoff": self.agent.return_value.answer, "observations": None}
+        run = SimpleNamespace(id=UUID(original["run_id"]), organization_id=self.org,
+                              requested_by_user_id=self.user_id, case_id=self.case_id,
+                              workspace_id=None, as_of=now, status="succeeded",
+                              deadline_at=now + timedelta(seconds=690), created_at=now,
+                              finished_at=now, error_code=None, response=original)
+        self.reserve.side_effect = None
+        self.reserve.return_value = (run, False)
+        self.start_patch("app.api.v1.endpoints.investigations.runs.expire",
+                         new_callable=AsyncMock)
+        self.start_patch("app.api.v1.endpoints.investigations.runs.authorized_run",
+                         new_callable=AsyncMock, return_value=run)
+        response = await self.post(extra_headers={"Idempotency-Key": "same-submission"})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["request_id"], original["request_id"])
+        self.assertEqual(response.json()["report"], original["report"])
+        self.agent.assert_not_awaited()
 
     async def test_missing_invalid_or_inactive_login_rejected(self):
         response = await self.client.post(f"/api/v1/organizations/{self.org}/investigations",
@@ -170,6 +231,14 @@ class InvestigationAPITests(unittest.IsolatedAsyncioTestCase):
             "internal_error": "PRIVATE_INTERNAL_ERROR",
             "trace": "PRIVATE_TRACE",
         })
+        # Keep the controlled Core result internally consistent: the public
+        # boundary now verifies the report against its observation before saving.
+        trace = self.agent.return_value.trace
+        verified = validate_report(json.dumps(evidence_contract(trace)), trace)
+        self.agent.return_value = CoreAgentResult(
+            render_report(verified, trace), trace, 2, verified.model_dump(mode="json"),
+            "PRIVATE_MODEL_RESPONSE", [{"content": "PRIVATE_PROMPT"}],
+        )
         before = datetime.now(UTC)
         response = await self.post()
         after = datetime.now(UTC)
@@ -181,7 +250,8 @@ class InvestigationAPITests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(cutoff.utcoffset(), timedelta(0))
         self.assertEqual(body["request_id"], response.headers["X-Request-ID"])
         UUID(body["request_id"])
-        self.assertEqual(set(body), {"request_id", "organization_id", "case_id", "as_of",
+        UUID(body["run_id"])
+        self.assertEqual(set(body), {"run_id", "request_id", "organization_id", "case_id", "as_of",
                                      "report", "handoff", "observations"})
         observations = body["observations"]
         self.assertEqual(set(observations), {"whole_order_completion", "shipment", "delivery", "allocation"})
@@ -267,6 +337,31 @@ class InvestigationAPITests(unittest.IsolatedAsyncioTestCase):
         response = await self.post()
         self.assertEqual(response.status_code, 502)
         self.assertEqual(response.json()["error"]["code"], "core_agent_error")
+        self.assertNotIn("PRIVATE_", response.text)
+
+    async def test_failure_that_did_not_update_a_run_reconciles_its_deadline(self):
+        self.agent.side_effect = CoreAgentError("PRIVATE_FAILURE", error_code="model_failed")
+        self.finish.return_value = False
+        reconcile = self.start_patch("app.api.v1.endpoints.investigations.runs.expire",
+                                     new_callable=AsyncMock)
+        response = await self.post()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["error"]["code"], "model_failed")
+        self.finish.assert_awaited_once()
+        self.assertEqual(self.finish.await_args.kwargs, {"error_code": "model_failed"})
+        reconcile.assert_awaited_once()
+        self.assertNotIn("PRIVATE_", response.text)
+
+    async def test_unexpected_failure_with_no_terminal_write_also_reconciles(self):
+        self.factory.side_effect = RuntimeError("PRIVATE_PROVIDER_CONFIG")
+        self.finish.return_value = False
+        reconcile = self.start_patch("app.api.v1.endpoints.investigations.runs.expire",
+                                     new_callable=AsyncMock)
+        response = await self.post()
+        self.assertEqual(response.status_code, 502)
+        self.assertEqual(response.json()["error"]["code"], "core_agent_error")
+        self.finish.assert_awaited_once()
+        reconcile.assert_awaited_once()
         self.assertNotIn("PRIVATE_", response.text)
 
     async def test_provider_construction_failure_is_sanitized(self):

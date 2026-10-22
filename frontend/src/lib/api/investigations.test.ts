@@ -12,6 +12,7 @@ vi.mock("@/lib/api/client", () => {
 import { ApiError, apiFetch } from "@/lib/api/client";
 import {
   createInvestigationRunner,
+  getInvestigationSubmission,
   investigateCase,
   investigationErrorMessage,
   type InvestigationResponse,
@@ -48,6 +49,22 @@ describe("read-only investigation request", () => {
     });
   });
 
+  it("uses a separate submission key and reads the original run after refresh", async () => {
+    vi.mocked(apiFetch).mockResolvedValueOnce(response).mockResolvedValueOnce({
+      id: "run-1", organization_id: "org-1", case_id: "case-1", workspace_id: null,
+      as_of: response.as_of, status: "succeeded", deadline_at: response.as_of,
+      created_at: response.as_of, finished_at: response.as_of, error_code: null, result: response,
+    });
+    await investigateCase("org-1", { case_id: "case-1" }, undefined, "submit-1");
+    expect(apiFetch).toHaveBeenNthCalledWith(1, "/organizations/org-1/investigations", {
+      method: "POST", body: { case_id: "case-1" }, retryUnauthorized: false,
+      headers: { "Idempotency-Key": "submit-1" },
+    });
+    const restored = await getInvestigationSubmission("org-1", "submit-1");
+    expect(restored.status).toBe("succeeded");
+    expect(restored.result).toEqual(response);
+  });
+
   it("shows waiting, blocks a duplicate submission, then exposes the fixed report", async () => {
     let finish!: (value: InvestigationResponse) => void;
     const request = vi.fn(() => new Promise<InvestigationResponse>((resolve) => { finish = resolve; }));
@@ -79,7 +96,7 @@ describe("read-only investigation request", () => {
     [new ApiError(403, "permission_denied", "internal"), "无权"],
     [new ApiError(422, "validation_error", "internal"), "输入无效"],
     [new ApiError(502, "tool_failed", "secret trace"), "调查执行失败"],
-    [new TypeError("network details"), "网络连接失败"],
+    [new TypeError("network details"), "连接已中断"],
   ])("maps failures to a safe non-business error state", async (error, expected) => {
     const states: InvestigationViewState[] = [];
     await createInvestigationRunner((state) => states.push(state), async () => { throw error; })

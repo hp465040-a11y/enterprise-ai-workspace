@@ -25,6 +25,7 @@ from app.models.exception_case import ExceptionCase  # noqa: F401
 from app.models.fulfillment_event import FulfillmentEvent  # noqa: F401
 from app.models.ingestion_job import IngestionJob  # noqa: F401
 from app.models.inventory_record import InventoryRecord  # noqa: F401
+from app.models.investigation_run import InvestigationRun  # noqa: F401
 from app.models.message import Message, MessageCitation  # noqa: F401
 from app.models.order import Order  # noqa: F401
 from app.models.order_item import OrderItem  # noqa: F401

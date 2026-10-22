@@ -1,5 +1,77 @@
 # Project A demo: verified report and authenticated ActionRequest flow
 
+## Current local delivery path (new installation)
+
+This path uses the existing isolated preparation scripts. It does not migrate the business
+database or reuse a rolled-back C05 case. From a new checkout, install the existing
+backend/frontend dependencies, start this project's PostgreSQL, Redis and Qdrant,
+and make the configured Ollama chat and embedding models available:
+
+```powershell
+py -3.12 -m venv .venv-d4
+.\.venv-d4\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
+Push-Location frontend; npm ci; Pop-Location
+docker compose up -d postgres redis qdrant
+```
+
+The guarded test database must be `ragforge_day6_test` on host port 5433; the
+scripts refuse another database. If absent, create this **empty isolated test
+database once** in the existing Compose PostgreSQL service using its configured
+`POSTGRES_USER` (for example, through `docker compose exec postgres psql`). This
+is an operator prerequisite, not a migration of the Compose business database.
+After confirming the database is absent, the one-time PowerShell command is:
+
+```powershell
+docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE ragforge_day6_test"'
+```
+
+From ordinary PowerShell in the repository root, with the existing test database ready:
+
+```powershell
+.\scripts\start_investigation_allocation_demo.ps1
+```
+
+The launcher reads this project's PostgreSQL container credentials in memory, checks
+dependencies and the test database, prepares the existing action-demo identity only
+when its state file is absent, then prepares or inspects the allocation fixture. It
+adds the existing ActionRequest migrations `0005`–`0007` and run migration `0009`
+only in that guarded allocation schema when needed, and starts
+the isolated API/page at `127.0.0.1:8125` / `127.0.0.1:3110`. It refuses partially
+prepared state and occupied ports. Credentials are restored in the launcher process.
+For a database-only check before starting the demo, run
+`.\scripts\start_investigation_allocation_demo.ps1 -VerifyOnly` in ordinary PowerShell.
+It runs the targeted investigation lifecycle tests against random schemas in
+`ragforge_day6_test`, checks schema cleanup, and does not call a model or prepare
+retained demo data. Stop if the test reports a failure; do not use historical
+Graph/API evidence to infer this new persistence path passed.
+Read the member/admin email and password locally from the ignored
+`scripts/action_request_demo_state.json`; never copy them into evidence. Read the
+case ID, workspace ID and exact `as_of` from the ignored
+`scripts/investigation_allocation_demo_state.json`. Log in at
+`http://127.0.0.1:3110/login`, select the fixture enterprise, open **订单调查**,
+enter that case and workspace, enable required SOP retrieval, and submit once.
+The page keeps a separate submission key across refreshes, checks the original run,
+and offers authorized saved-report history. A connection error is not evidence that
+the model stopped: depending on transport cancellation, it may finish and save or
+be marked failed, so check the original submission before another run. On the current
+single-API-worker deployment, a restarted process marks its old running records
+`interrupted` on the next status read; the 690-second deadline also prevents a
+permanent running state. If no record was reserved before a connection error, the
+page can resend the saved original parameters with the **same** submission key;
+it does not silently start a new keyed investigation. A failed report save does
+not produce a recoverable success. This is not Graph checkpoint recovery.
+
+On the **same 3110 page and 8125 API**, copy the investigated case ID by hand
+into **客户通知申请**, then sign in as the enterprise admin to approve and explicitly
+create the in-system notification record. Both actions use the same guarded
+allocation schema, so the case ID is valid there; switching to the older
+3108/8123 action-demo schema would not find this case. A saved
+report does not automatically submit an application or send a message. `delivery_status`
+remains `not_sent`. The targeted offline, guarded PostgreSQL and controlled-provider
+browser refresh results are separated in the [redacted persistence acceptance summary](PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md).
+The refresh check used real JWT/API and isolated PostgreSQL with a controlled Provider;
+it is not a new real-chat-model investigation pass.
+
 The linked [redacted baseline summary](PROJECT_A_BASELINE_EVIDENCE.md) is commit-safe. Original `scripts/*.json`, `.jsonl` and logs cited by name are local-only and are not included in the repository. Run the evidence commands below from the repository root in PowerShell only when those local archives are available. They display existing results and make no model request or database change. The C05 fixture and ActionRequest test schemas were rolled back, so their IDs are **not** live records.
 
 ## Historical real-result replay (current Graph)

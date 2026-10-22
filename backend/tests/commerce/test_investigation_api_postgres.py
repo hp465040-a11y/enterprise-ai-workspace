@@ -31,7 +31,8 @@ class InvestigationAPIPostgresTests(unittest.IsolatedAsyncioTestCase):
         # schema; its outer transaction removes all data and DDL on every exit.
         helper = Day6PostgresTests()
         async with helper.database("models") as (conn, own_org, own_order):
-            for name in ("users", "organization_members", "refresh_tokens"):
+            for name in ("users", "organization_members", "refresh_tokens",
+                         "workspaces", "workspace_members", "investigation_runs"):
                 await conn.run_sync(Base.metadata.tables[name].create)
 
             other_org, other_order, user_id = uuid4(), uuid4(), uuid4()
@@ -77,7 +78,8 @@ class InvestigationAPIPostgresTests(unittest.IsolatedAsyncioTestCase):
                 async def agent_stub(_provider, agent_db, *, organization_id, case_id, as_of):
                     calls.append((organization_id, case_id, as_of))
                     self.assertIs(_provider, provider)
-                    self.assertIs(agent_db, db)
+                    self.assertIsInstance(agent_db, AsyncSession)
+                    self.assertIsNot(agent_db, db)
                     try:
                         await get_exception_case(agent_db, organization_id=organization_id,
                                                  case_id=case_id)

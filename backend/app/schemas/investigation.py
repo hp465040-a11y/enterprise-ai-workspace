@@ -1,5 +1,6 @@
 """Public read-only investigation contract; internal traces are not exposed."""
 
+from datetime import datetime
 from typing import Literal
 from uuid import UUID
 
@@ -68,6 +69,7 @@ class InvestigationRequest(BaseModel):
 
 
 class InvestigationResponse(BaseModel):
+    run_id: UUID | None = None
     request_id: str
     organization_id: UUID
     case_id: UUID
@@ -75,3 +77,17 @@ class InvestigationResponse(BaseModel):
     report: EvidenceReport
     handoff: str
     observations: InvestigationObservations | None = None
+
+
+class InvestigationRunRead(BaseModel):
+    id: UUID
+    organization_id: UUID
+    case_id: UUID
+    workspace_id: UUID | None
+    as_of: datetime
+    status: Literal["running", "succeeded", "failed", "interrupted"]
+    deadline_at: datetime
+    created_at: datetime
+    finished_at: datetime | None
+    error_code: str | None
+    result: InvestigationResponse | None = None

@@ -12,8 +12,10 @@ from app.api.v1.router import api_router
 from app.core.config import settings
 from app.core.exceptions import register_exception_handlers
 from app.core.logging import configure_logging, get_logger
+from app.db.session import AsyncSessionLocal
 from app.middleware.rate_limit import RateLimitMiddleware
 from app.middleware.request_context import RequestContextMiddleware
+from app.services import investigation_run_service
 
 logger = get_logger(__name__)
 
@@ -26,6 +28,12 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         await get_vector_store().ensure_collection()
     except Exception as exc:  # noqa: BLE001 — startup must not crash if Qdrant isn't up yet
         logger.warning("vector_store_bootstrap_failed", error=str(exc))
+    # The current single-worker deployment cannot resume an old Graph call.
+    try:
+        async with AsyncSessionLocal() as db:
+            await investigation_run_service.expire(db)
+    except Exception as exc:  # noqa: BLE001 -- reads also reconcile after an unavailable DB
+        logger.warning("investigation_run_reconcile_failed", error_type=type(exc).__name__)
     yield
     logger.info("app_shutdown")
 

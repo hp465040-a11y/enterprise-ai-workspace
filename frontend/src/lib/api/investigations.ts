@@ -1,6 +1,7 @@
 import { ApiError, apiFetch } from "@/lib/api/client";
 
 export interface InvestigationResponse {
+  run_id?: string | null;
   request_id: string;
   organization_id: string;
   case_id: string;
@@ -26,6 +27,34 @@ export interface InvestigationResponse {
   } | null;
 }
 
+export interface InvestigationRun {
+  id: string;
+  organization_id: string;
+  case_id: string;
+  workspace_id: string | null;
+  as_of: string;
+  status: "running" | "succeeded" | "failed" | "interrupted";
+  deadline_at: string;
+  created_at: string;
+  finished_at: string | null;
+  error_code: string | null;
+  result: InvestigationResponse | null;
+}
+
+export type InvestigationSubmission = InvestigationResponse | InvestigationRun;
+
+export function getInvestigationSubmission(organizationId: string, key: string): Promise<InvestigationRun> {
+  return apiFetch<InvestigationRun>(
+    `/organizations/${organizationId}/investigations/submissions/${encodeURIComponent(key)}`,
+    { retryUnauthorized: false },
+  );
+}
+
+export function listInvestigations(organizationId: string): Promise<InvestigationRun[]> {
+  return apiFetch<InvestigationRun[]>(`/organizations/${organizationId}/investigations`,
+    { retryUnauthorized: false });
+}
+
 export interface TimingObservation {
   status: string | null;
   scope: string | null;
@@ -47,11 +76,13 @@ export function investigateCase(
   organizationId: string,
   input: InvestigationInput,
   onTransportStage?: (stage: "response_headers" | "json_parsed", status?: number) => void,
-): Promise<InvestigationResponse> {
-  return apiFetch<InvestigationResponse>(`/organizations/${organizationId}/investigations`, {
+  submissionKey?: string,
+): Promise<InvestigationSubmission> {
+  return apiFetch<InvestigationSubmission>(`/organizations/${organizationId}/investigations`, {
     method: "POST",
     body: input,
     retryUnauthorized: false,
+    ...(submissionKey ? { headers: { "Idempotency-Key": submissionKey } } : {}),
     ...(onTransportStage ? {
       onResponseHeaders: (status: number) => onTransportStage("response_headers", status),
       onJsonParsed: () => onTransportStage("json_parsed"),
@@ -66,13 +97,13 @@ export function investigationErrorMessage(error: unknown): string {
     if (error.status === 422) return "输入无效，请检查案件 ID 和分析时点。";
     if (error.status >= 500) return "调查执行失败，请稍后人工核查。此次没有形成业务结论。";
   }
-  if (error instanceof TypeError) return "网络连接失败，调查未完成；请检查连接后再试。";
+  if (error instanceof TypeError) return "连接已中断，服务端调查状态尚未确认；请先核查原提交，勿直接重试。";
   return "调查未完成，请核查请求状态。";
 }
 
 export type InvestigationViewState =
   | { status: "idle" }
-  | { status: "pending" }
+  | { status: "pending"; run?: InvestigationRun }
   | { status: "success"; result: InvestigationResponse }
   | { status: "error"; message: string };
 
@@ -97,7 +128,7 @@ export function createInvestigationRunner(
         const operation = request(organizationId, input);
         const result = localReplayDeadlineMs === undefined ? await operation : await Promise.race([
           operation,
-          new Promise<InvestigationResponse>((_, reject) => {
+          new Promise<InvestigationSubmission>((_, reject) => {
             timer = setTimeout(() => {
               onDeadlineStage?.("timeout_fired");
               reject(new LocalReplayTimeoutError());
@@ -105,7 +136,12 @@ export function createInvestigationRunner(
             onDeadlineStage?.("timeout_armed");
           }),
         ]);
-        update({ status: "success", result });
+        if ("status" in result) {
+          if (result.status === "running") update({ status: "pending", run: result });
+          else if (result.status === "succeeded" && result.result)
+            update({ status: "success", result: result.result });
+          else update({ status: "error", message: "调查已结束，但未形成可恢复的已校验报告。" });
+        } else update({ status: "success", result });
       } catch (error) {
         update({ status: "error", message: error instanceof LocalReplayTimeoutError
           ? "本地保存报告回放超过等待截止，页面未完成结果处理；未发起新的调查。"

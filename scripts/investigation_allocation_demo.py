@@ -19,6 +19,14 @@ import httpx
 import investigation_page_demo as previous  # Reuse observation without altering it.
 from alembic.migration import MigrationContext
 from alembic.operations import Operations
+from fastapi import FastAPI
+from knowledge_retrieval_verify import index_samples, seed_reference
+from langchain_core.tools import StructuredTool
+from qdrant_client import AsyncQdrantClient
+from sqlalchemy import MetaData, insert, select, text
+from sqlalchemy.ext.asyncio import AsyncSession
+from structlog.contextvars import get_contextvars
+
 from app.ai.agents import core_agent as core
 from app.ai.agents import core_graph
 from app.ai.agents.core_agent import CoreAgentError
@@ -39,13 +47,6 @@ from app.models.organization import Organization, OrganizationMember
 from app.models.user import User
 from app.models.workspace import WorkspaceMember
 from app.services import fulfillment_service
-from fastapi import FastAPI
-from knowledge_retrieval_verify import index_samples, seed_reference
-from langchain_core.tools import StructuredTool
-from qdrant_client import AsyncQdrantClient
-from sqlalchemy import MetaData, insert, select, text
-from sqlalchemy.ext.asyncio import AsyncSession
-from structlog.contextvars import get_contextvars
 
 ROOT = Path(__file__).resolve().parents[1]
 STATE = ROOT / "scripts/investigation_allocation_demo_state.json"
@@ -66,6 +67,7 @@ SOP_TEXT = (
 TABLES = (
     "organizations", "users", "organization_members", "refresh_tokens",
     "workspaces", "workspace_members", "documents", "document_chunks",
+    "audit_logs",
 )
 
 
@@ -102,13 +104,89 @@ def apply_migrations(sync) -> None:
     with Operations.context(MigrationContext.configure(sync)):
         for filename in (
             "0002_commerce_core.py", "0003_fulfillment_investigation.py",
-            "0008_order_allocation_evidence.py",
+            "0005_action_requests.py", "0006_action_request_review.py",
+            "0007_customer_notifications.py", "0008_order_allocation_evidence.py",
+            "0009_investigation_runs.py",
         ):
             path = ROOT / "backend/alembic/versions" / filename
             spec = importlib.util.spec_from_file_location(filename, path)
             module = importlib.util.module_from_spec(spec)
             spec.loader.exec_module(module)
             module.upgrade()
+
+
+async def upgrade_runs() -> None:
+    """Add existing ActionRequest tables and run history only to this guarded fixture."""
+    state = state_read()
+    retained = demo.load_state()
+    if state["organization_id"] != retained["organization_id"]:
+        raise RuntimeError("Demo organization identity differs")
+    base, scoped = demo.engines(state["schema"])
+    source_base, source = demo.engines(retained["schema"])
+    try:
+        async with base.connect() as conn:
+            await demo.assert_database(conn)
+        async with source.connect() as conn:
+            if await conn.scalar(text("SELECT current_schema()")) != retained["schema"]:
+                raise RuntimeError("Wrong identity source schema")
+            admin = (await conn.execute(select(User.__table__).where(
+                User.id == UUID(retained["admin_id"])))).mappings().one()
+            admin_member = (await conn.execute(select(OrganizationMember.__table__).where(
+                OrganizationMember.organization_id == UUID(state["organization_id"]),
+                OrganizationMember.user_id == admin["id"]))).mappings().one()
+            if admin_member["role"] not in ("admin", "owner"):
+                raise RuntimeError("Demo reviewer does not have enterprise review role")
+        async with scoped.begin() as conn:
+            if await conn.scalar(text("SELECT current_schema()")) != state["schema"]:
+                raise RuntimeError("Wrong allocation schema")
+            action = await conn.scalar(text("SELECT to_regclass('action_requests') IS NOT NULL"))
+            notification = await conn.scalar(text("SELECT to_regclass('customer_notifications') IS NOT NULL"))
+            audit = await conn.scalar(text("SELECT to_regclass('audit_logs') IS NOT NULL"))
+            review = await conn.scalar(text(
+                "SELECT EXISTS(SELECT 1 FROM information_schema.columns "
+                "WHERE table_schema=current_schema() AND table_name='action_requests' "
+                "AND column_name='reviewed_at')"))
+            if any((action, notification, audit, review)) and not all((action, notification, audit, review)):
+                raise RuntimeError("Partial ActionRequest schema; inspect before changing it")
+            run_exists = await conn.scalar(text("SELECT to_regclass('investigation_runs') IS NOT NULL"))
+            filenames = []
+            if not action:
+                await conn.run_sync(Base.metadata.tables["audit_logs"].create)
+                filenames.extend(("0005_action_requests.py", "0006_action_request_review.py",
+                                  "0007_customer_notifications.py"))
+            if not run_exists:
+                filenames.append("0009_investigation_runs.py")
+            modules = []
+            for filename in filenames:
+                path = ROOT / "backend/alembic/versions" / filename
+                spec = importlib.util.spec_from_file_location(filename, path)
+                module = importlib.util.module_from_spec(spec)
+                spec.loader.exec_module(module)
+                modules.append(module)
+            def migrate(sync):
+                with Operations.context(MigrationContext.configure(sync)):
+                    for module in modules:
+                        module.upgrade()
+            if modules:
+                await conn.run_sync(migrate)
+            existing_admin = (await conn.execute(select(User.__table__).where(
+                User.id == admin["id"]))).mappings().one_or_none()
+            if existing_admin is None:
+                await conn.execute(insert(User.__table__).values(**dict(admin)))
+            elif existing_admin["email"] != admin["email"]:
+                raise RuntimeError("Existing demo reviewer identity differs")
+            existing_member = (await conn.execute(select(OrganizationMember.__table__).where(
+                OrganizationMember.organization_id == UUID(state["organization_id"]),
+                OrganizationMember.user_id == admin["id"]))).mappings().one_or_none()
+            if existing_member is None:
+                await conn.execute(insert(OrganizationMember.__table__).values(**dict(admin_member)))
+            elif existing_member["role"] != admin_member["role"]:
+                raise RuntimeError("Existing demo reviewer role differs")
+    finally:
+        await source_base.dispose()
+        await source.dispose()
+        await scoped.dispose()
+        await base.dispose()
 
 
 async def preflight() -> None:
@@ -178,6 +256,13 @@ async def prepare() -> None:
             member = (await conn.execute(select(OrganizationMember.__table__).where(
                 OrganizationMember.organization_id == org["id"],
                 OrganizationMember.user_id == user["id"]))).mappings().one()
+            admin = (await conn.execute(select(User.__table__).where(
+                User.id == UUID(retained["admin_id"])))).mappings().one()
+            admin_member = (await conn.execute(select(OrganizationMember.__table__).where(
+                OrganizationMember.organization_id == org["id"],
+                OrganizationMember.user_id == admin["id"]))).mappings().one()
+            if admin_member["role"] not in ("admin", "owner"):
+                raise RuntimeError("Demo reviewer does not have enterprise review role")
         async with base.begin() as conn:
             await demo.assert_database(conn)
             await conn.execute(text(f'CREATE SCHEMA "{state["schema"]}"'))
@@ -189,7 +274,8 @@ async def prepare() -> None:
                 raise RuntimeError("Wrong allocation schema")
             await conn.run_sync(apply_migrations)
             for table, row in ((Organization.__table__, org), (User.__table__, user),
-                               (OrganizationMember.__table__, member)):
+                               (OrganizationMember.__table__, member), (User.__table__, admin),
+                               (OrganizationMember.__table__, admin_member)):
                 await conn.execute(insert(table).values(**dict(row)))
             order_id, case_id = UUID(state["order_id"]), UUID(state["case_id"])
             await conn.execute(insert(Order).values(
@@ -563,12 +649,13 @@ async def cleanup() -> None:
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
-    parser.add_argument("command", choices=("preflight", "prepare", "inspect", "serve", "verify", "cleanup"))
+    parser.add_argument("command", choices=("preflight", "prepare", "inspect", "upgrade-runs",
+                                            "serve", "verify", "cleanup"))
     command = parser.parse_args().command
     if command == "serve":
         serve()
     elif command == "verify":
         verify()
     else:
-        asyncio.run({"preflight": preflight, "prepare": prepare,
+        asyncio.run({"preflight": preflight, "prepare": prepare, "upgrade-runs": upgrade_runs,
                      "inspect": inspect, "cleanup": cleanup}[command]())

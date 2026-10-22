@@ -10,17 +10,25 @@ import { useOrganizations } from "@/hooks/use-organizations";
 import { useWorkspaces } from "@/hooks/use-workspaces";
 import {
   createInvestigationRunner,
+  getInvestigationSubmission,
   investigateCase,
+  investigationErrorMessage,
+  listInvestigations,
+  type InvestigationResponse,
+  type InvestigationInput,
+  type InvestigationRun,
   type InvestigationViewState,
 } from "@/lib/api/investigations";
 import { beijingTime, investigationPresentation } from "@/lib/investigation-presentation";
 import { isLocalInvestigationReplay, newReplayComponent, newReplaySubmission, replayTrace } from "@/lib/investigation-replay-diagnostics";
 import { useWorkspaceStore } from "@/store/workspace-store";
+import { useAuthStore } from "@/store/auth-store";
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 export default function InvestigationsPage() {
   const organizationId = useWorkspaceStore((state) => state.organizationId);
+  const userId = useAuthStore((state) => state.user?.id);
   const { data: organizations, isLoading: organizationsLoading } = useOrganizations();
   const organization = organizations?.find((item) => item.id === organizationId);
   const organizationLabel = organization?.name ?? (organizationId
@@ -34,9 +42,83 @@ export default function InvestigationsPage() {
   const [view, setView] = useState<InvestigationViewState>({ status: "idle" });
   const [copyStatus, setCopyStatus] = useState("");
   const [replayBuild, setReplayBuild] = useState(false);
+  const [history, setHistory] = useState<InvestigationRun[]>([]);
+  const [statusNotice, setStatusNotice] = useState("");
+  const [recovering, setRecovering] = useState(true);
   const runner = useRef<ReturnType<typeof createInvestigationRunner> | null>(null);
   const componentId = useRef(0);
   const submissionId = useRef(0);
+  const activeKey = useRef<string | null>(null);
+  const activeInput = useRef<InvestigationInput | null>(null);
+  const storageKey = organizationId && userId
+    ? `ragforge-investigation-submission:${organizationId}:${userId}` : null;
+
+  useEffect(() => {
+    if (isLocalInvestigationReplay()) { setRecovering(false); return; }
+    if (!organizationId || !storageKey) {
+      setHistory([]);
+      setView({ status: "idle" });
+      activeKey.current = null;
+      activeInput.current = null;
+      setRecovering(false);
+      return;
+    }
+    let active = true;
+    setRecovering(true);
+    const org = organizationId;
+    const stored = localStorage.getItem(storageKey);
+    let key: string | null = null;
+    let input: InvestigationInput | null = null;
+    if (stored) {
+      try {
+        const parsed: unknown = JSON.parse(stored);
+        if (parsed && typeof parsed === "object" && "key" in parsed && "input" in parsed
+            && typeof parsed.key === "string" && parsed.input && typeof parsed.input === "object") {
+          key = parsed.key;
+          input = parsed.input as InvestigationInput;
+        }
+      } catch { key = stored; } // Older local submissions stored only the key.
+    }
+    setHistory([]);
+    setView({ status: "idle" });
+    setStatusNotice("");
+    activeKey.current = key;
+    activeInput.current = input;
+    const accept = (run: InvestigationRun) => {
+      if (!active) return;
+      if (run.status === "running") {
+        setView({ status: "pending", run });
+        setStatusNotice("原提交尚无终态；可能仍在运行或等待状态落库，请勿再次提交。");
+      } else if (run.status === "succeeded" && run.result) {
+        setView({ status: "success", result: run.result });
+        setStatusNotice("已读取保存的调查报告。");
+      } else {
+        setView({ status: "error", message: "原调查已结束，未保存已校验报告。" });
+        setStatusNotice("本次没有可恢复的业务结论，可核对后重新提交。");
+      }
+      if (run.status !== "running") {
+        localStorage.removeItem(storageKey);
+        if (activeKey.current === key) activeKey.current = null;
+        activeInput.current = null;
+        void listInvestigations(org).then((items) => { if (active) setHistory(items); }).catch(() => {});
+      }
+    };
+    const check = async () => {
+      if (!key) { if (active) setRecovering(false); return; }
+      try { accept(await getInvestigationSubmission(org, key)); }
+      catch { if (active) setStatusNotice("暂时无法核对原调查状态；请勿重复提交，稍后再核查。"); }
+      finally { if (active) setRecovering(false); }
+    };
+    void check();
+    void listInvestigations(org).then((items) => { if (active) setHistory(items); }).catch(() => {});
+    const interval = setInterval(() => {
+      if (activeKey.current) void getInvestigationSubmission(org, activeKey.current)
+        .then(accept).catch(() => {
+          if (active) setStatusNotice("暂时无法核对原调查状态；请勿重复提交，稍后再核查。");
+        });
+    }, 10_000);
+    return () => { active = false; clearInterval(interval); };
+  }, [organizationId, storageKey]);
   useEffect(() => {
     const localReplay = isLocalInvestigationReplay();
     setReplayBuild(localReplay);
@@ -65,7 +147,7 @@ export default function InvestigationsPage() {
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
-    if (runner.current?.pending) {
+    if (recovering || runner.current?.pending || activeKey.current) {
       replayTrace("duplicate_blocked", submissionId.current, componentId.current);
       return;
     }
@@ -96,22 +178,104 @@ export default function InvestigationsPage() {
     replayTrace("submit_started", sequence, componentId.current);
     const update = (state: InvestigationViewState) => {
       replayTrace(`state_write_${state.status}`, sequence, componentId.current);
-      setView(state);
+      if (useWorkspaceStore.getState().organizationId === organization.id
+          && useAuthStore.getState().user?.id === userId) setView(state);
     };
+    let confirmedResult: InvestigationResponse | null = null;
     const request = (org: string, input: Parameters<typeof investigateCase>[1]) =>
       investigateCase(org, input, (stage, status) =>
-        replayTrace(stage, sequence, componentId.current, status));
-    runner.current = createInvestigationRunner(update, request, localReplay ? 10_000 : undefined,
-      (stage) => replayTrace(stage, sequence, componentId.current));
-    void runner.current.submit(organization.id, {
+        replayTrace(stage, sequence, componentId.current, status), activeKey.current ?? undefined)
+        .then((answer) => {
+          if (!("status" in answer)) confirmedResult = answer;
+          return answer;
+        });
+    const key = localReplay ? null : crypto.randomUUID();
+    if (!localReplay && !storageKey) return;
+    const input: InvestigationInput = {
       case_id: normalizedCaseId,
       ...(timestamp ? { as_of: timestamp.toISOString() } : {}),
       ...(selectedWorkspace ? { workspace_id: selectedWorkspace.id } : {}),
       ...(requireKnowledge ? { require_knowledge: true } : {}),
-    }).then(
-      () => replayTrace("runner_settled", sequence, componentId.current),
+    };
+    if (key && storageKey) {
+      localStorage.setItem(storageKey, JSON.stringify({ key, input }));
+      activeKey.current = key;
+      activeInput.current = input;
+      setStatusNotice("调查提交中；刷新页面后可按本次提交标识恢复状态。");
+    }
+    runner.current = createInvestigationRunner(update, request, localReplay ? 10_000 : undefined,
+      (stage) => replayTrace(stage, sequence, componentId.current));
+    void runner.current.submit(organization.id, input).then(
+      () => {
+        replayTrace("runner_settled", sequence, componentId.current);
+        if (!key) return;
+        if (useWorkspaceStore.getState().organizationId !== organization.id
+            || useAuthStore.getState().user?.id !== userId) return;
+        if (confirmedResult) {
+          if (storageKey) localStorage.removeItem(storageKey);
+          if (activeKey.current === key) activeKey.current = null;
+          activeInput.current = null;
+          setStatusNotice("已保存并显示本次校验报告。");
+          void listInvestigations(organization.id).then(setHistory).catch(() => {});
+          return;
+        }
+        void getInvestigationSubmission(organization.id, key).then((run) => {
+          if (run.status === "running") {
+            setView({ status: "pending", run });
+            setStatusNotice("原提交尚无终态；请勿重复提交，继续核查保存状态。");
+          }
+          if (run.status !== "running" && storageKey) {
+            localStorage.removeItem(storageKey);
+            if (activeKey.current === key) activeKey.current = null;
+            activeInput.current = null;
+          }
+          if (run.status === "succeeded" && run.result) {
+            setView({ status: "success", result: run.result });
+            setStatusNotice("已读取保存的调查报告。");
+            void listInvestigations(organization.id).then(setHistory).catch(() => {});
+          } else if (run.status === "failed" || run.status === "interrupted") {
+            setView({ status: "error", message: "调查已结束，但未形成已保存的报告。" });
+          }
+        }).catch(() => setStatusNotice("无法核对本次提交的最终状态；请勿再次提交，稍后再核查。"));
+      },
       () => replayTrace("runner_rejected", sequence, componentId.current),
     );
+  }
+
+  async function retryOriginalSubmission() {
+    const key = activeKey.current;
+    const input = activeInput.current;
+    if (!organizationId || !key || !input || recovering || view.status === "pending"
+        || runner.current?.pending) return;
+    const org = organizationId;
+    const user = userId;
+    setView({ status: "pending" });
+    setStatusNotice("正使用原提交标识和原参数核对；数据库幂等约束只允许一次执行。");
+    try {
+      const answer = await investigateCase(org, input, undefined, key);
+      if (useWorkspaceStore.getState().organizationId !== org
+          || useAuthStore.getState().user?.id !== user || activeKey.current !== key) return;
+      if ("status" in answer && answer.status === "running") {
+        setView({ status: "pending", run: answer });
+        return;
+      }
+      const result = "status" in answer ? answer.result : answer;
+      if (result) {
+        setView({ status: "success", result });
+        setStatusNotice("已读取并显示保存的调查报告。");
+      } else {
+        setView({ status: "error", message: "原调查已结束，但未保存已校验报告。" });
+      }
+      if (storageKey) localStorage.removeItem(storageKey);
+      activeKey.current = null;
+      activeInput.current = null;
+      void listInvestigations(org).then(setHistory).catch(() => {});
+    } catch (error) {
+      if (useWorkspaceStore.getState().organizationId !== org
+          || useAuthStore.getState().user?.id !== user || activeKey.current !== key) return;
+      setView({ status: "error", message: investigationErrorMessage(error) });
+      setStatusNotice("原提交结果仍需核对；已保留提交标识和参数，请勿另建提交。");
+    }
   }
 
   const pending = view.status === "pending";
@@ -135,6 +299,8 @@ export default function InvestigationsPage() {
         <h1 className="text-xl font-semibold">订单履约异常调查</h1>
         <p className="text-sm text-muted-foreground">只读查询并生成调查交接单；建议尚未执行。</p>
         {replayBuild && <p className="text-xs text-muted-foreground">本地保存报告回放 · 页面脚本 20261022-r7 · 不发起新调查</p>}
+        {process.env.NEXT_PUBLIC_INVESTIGATION_CONTROLLED_REFRESH === "1" &&
+          <p className="text-xs font-medium text-amber-700">受控 Provider＋真实隔离数据库验收：仅验证提交记录与刷新恢复；不调用聊天模型，不代表业务原因调查通过。</p>}
       </div>
 
       <Card>
@@ -169,7 +335,8 @@ export default function InvestigationsPage() {
                 onChange={(event) => setRequireKnowledge(event.target.checked)} disabled={pending} />
               必须检索所选工作区的 SOP
             </label>
-            <Button key={pending ? "pending" : "ready"} type="submit" disabled={pending || !organization}
+            <Button key={pending ? "pending" : "ready"} type="submit"
+              disabled={recovering || pending || !!activeKey.current || !organization}
               data-investigation-submit data-investigation-submit-status={view.status} translate="no"
               className="self-start">
               {pending ? "调查中…" : "生成只读交接单"}
@@ -179,8 +346,26 @@ export default function InvestigationsPage() {
       </Card>
 
       {pending && <p role="status" data-investigation-pending aria-live="polite" className="text-sm text-muted-foreground">
-        正在调查并校验证据，请等待本次请求完成。
+        提交尚无终态；正在等待调查或保存结果。请勿重复提交。
       </p>}
+      {statusNotice && <p role="status" className="text-sm text-muted-foreground">{statusNotice}</p>}
+      {activeKey.current && view.status !== "pending" && <Button type="button" variant="outline"
+        onClick={() => {
+          if (!organizationId || !activeKey.current) return;
+          void getInvestigationSubmission(organizationId, activeKey.current).then((run) => {
+            if (run.status === "running") setView({ status: "pending", run });
+            else if (run.status === "succeeded" && run.result) setView({ status: "success", result: run.result });
+            else setView({ status: "error", message: "调查已结束，未保存报告。" });
+            if (run.status !== "running" && storageKey) {
+              localStorage.removeItem(storageKey);
+              activeKey.current = null;
+            }
+          }).catch(() => setStatusNotice("无法核对原调查状态；请勿重复提交。"));
+        }}>核查原调查状态</Button>}
+      {activeKey.current && activeInput.current && view.status !== "pending" &&
+        <Button type="button" variant="outline" onClick={() => void retryOriginalSubmission()}>
+          使用原提交标识重试
+        </Button>}
       {view.status === "error" && <p role="alert" className="text-sm text-destructive">
         {view.message}
       </p>}
@@ -246,6 +431,14 @@ export default function InvestigationsPage() {
           </details>
         </CardContent>
       </Card>}
+      {history.some((item) => item.organization_id === organizationId) && <Card><CardHeader><CardTitle className="text-base">我的调查记录</CardTitle></CardHeader>
+        <CardContent className="space-y-2 text-sm">{history.filter((item) => item.organization_id === organizationId).map((item) =>
+          <div key={item.id} className="flex items-center justify-between gap-2 border-b pb-2">
+            <span>案件 {item.case_id} · {item.status === "succeeded" ? "已完成" : item.status === "running" ? "尚无终态" : "未形成报告"}</span>
+            {item.status === "succeeded" && item.result && <Button type="button" variant="outline" size="sm"
+              disabled={!!activeKey.current}
+              onClick={() => setView({ status: "success", result: item.result! })}>查看报告</Button>}
+          </div>)}</CardContent></Card>}
     </div>
   );
 }

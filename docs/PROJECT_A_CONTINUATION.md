@@ -1066,3 +1066,26 @@ r5 的两个外层 `<details>` 源码均无 `open`，默认收起；用户反馈
 ## 2026-10-22 Project A 本轮功能冻结与页面最终验收
 
 用户已手工确认 3111 的 r7 保存响应回放：报告出现后按钮恢复“生成只读交接单”；连同先前确认的报告展示、r6 精简布局、证据展开和完整请求标识复制，保存响应的实际 React 页面交互验收完成，等待状态能退出。此结果仅是已有 HTTP 结果的浏览器回放；真实 Graph/API 仍只对应 2026-10-21 的一次 HTTP 200、490.797 秒、六条业务事件及独立 SOP 引用的合成隔离场景，不合并成新增实时浏览器到模型 E2E 或稳定率。页面布局与功能至此冻结；原始运行证据和演示状态仍只留本地，本人学习不标 PASS。
+## 2026-10-22 冻结范围：调查提交与报告持久化（隔离 PG 待验）
+
+本轮仅实现冻结清单第一项和现有演示路径：新增 `0009_investigation_runs`、按企业/申请人/独立提交键的数据库唯一约束与请求参数指纹；提交占位在模型调用前独立提交。原 Graph、工具、权限、报告校验和预算不变；服务端 690 秒截止，只有原校验器通过且结果事务提交成功才返回成功。重复同键同参读取原状态/报告，同键异参冲突。读取历史结果重新验证企业成员和工作区权限，当前仅申请人本人可读。断线后须查原提交；服务重启或截止将旧 running 记录转为 interrupted，不提供 Graph 断点恢复，保存失败不冒充可恢复成功。前端按企业/用户保存原提交键及参数，刷新读取状态/历史；原状态未知时可显式用同键同参重试。没有新增 Celery 调查任务或审计查询 UI。
+
+复用 `scripts/start_investigation_allocation_demo.ps1`，仅在受保护的 `ragforge_day6_test`/`allocation_demo_*` schema 中补既有审核表和新调查表，使同一 3110/8125 页面可由调查案件手工进入申请、管理员审核和站内通知记录；原演示数据未重建。本轮未运行迁移或模型。验证：`python -m unittest tests.unit.test_investigation_api tests.unit.test_investigation_run_contract -q` 23 项通过；Ruff、Python compileall、前端 typecheck/定向 ESLint、PowerShell parser、`git diff --check` 通过。隔离 PG 专项 `scripts/investigation_run_verify.py` 已准备，覆盖真实唯一约束并发、独立会话保存/读取、权限撤销、受控 Provider 的 Graph 报告、失败/截止/保存故障及同 schema 申请审核通知路径，并断言随机 schema 清理；本进程 Docker config 与命名管道均被权限拒绝，故 **未执行该 PG 专项**，也未做当前版本浏览器刷新验收。普通 PowerShell 可用 `./scripts/start_investigation_allocation_demo.ps1 -VerifyOnly` 从本项目容器在内存读取凭据并只跑该专项；失败保留输出，不应推断通过。交付状态为代码与离线验证完成、数据库/浏览器验收待完成；历史真实 Graph/API 及保存响应回放结果不作为本次新持久化能力的验收。未 commit/push，未触碰业务库、共享服务或原演示数据；本人学习不标 PASS。
+## 2026-10-22 调查持久化专项暂停断点（用户补充）
+
+本轮停止施工和验证，保留当前未提交改动，不 commit/push。调查持久化与刷新恢复代码已落地，23 项离线 API 测试通过；隔离 PostgreSQL 专项仍**未验收**。用户报告普通 PowerShell 的 `-VerifyOnly` 先在启动脚本第 30 行发生 `Substring` 越界，随后一次尝试出现测试失败汇总；现有信息不足以判定专项测试本身的失败原因或清理结果。Codex 执行器的一次误发命令则在读取 Docker 配置时被拒，尚未进入测试；两者不得混为同一失败。
+
+下轮先只读核对当前启动脚本是否回退了凭据解析，恢复此前成功的“完整 `docker inspect` JSON → `Out-String` → `ConvertFrom-Json` → 遍历 `Config.Env` 并逐项 `-split '=', 2`”路径；保留容器/端口/隔离库身份保护，预检失败立即停止。随后才运行隔离 PG 专项并收取原始错误及清理结果；通过后再验浏览器刷新恢复。不调用模型、不重跑全矩阵、不扩展冻结范围，也不停止共享服务或删除演示数据。Codex 本轮误发的 `-VerifyOnly` 进程已以退出码 1 结束，没有启动持久测试进程；系统进程命令行只读核查被 CIM `Access denied` 拒绝，因此无法确认用户本机是否另有仍存活的同任务进程。
+## 2026-10-22 冻结范围续验：隔离 PG 原始结果待收取
+
+本轮定向核对当前 `start_investigation_allocation_demo.ps1` 与 `restart_investigation_allocation_api.ps1`：均使用完整 `docker inspect` JSON、`Out-String`/`ConvertFrom-Json`、逐条 `Config.Env` 字符串 `-split '=', 2`，无 `Substring`；脚本语法通过。用户先前报告的第 30 行越界与当前文件不符，不能据此判定当前脚本仍有该错误。为使验证失败在测试前停止，`scripts/investigation_run_verify.py` 增加一次不输出凭据的隔离 PG 连接/实际库名预检；定向 Ruff 和编译通过，未运行数据库测试。Codex 执行器此前读取 Docker 配置被拒，本轮未绕过权限或再次尝试 Docker。普通 PowerShell 的本次 `-VerifyOnly` 原始测试结果尚待收取；此前“测试失败汇总”无具体堆栈，失败原因仍未知。PG 专项未通过前不进行浏览器刷新恢复验收、不迁移业务库、不调用模型、不 commit/push。当前单 API worker 限制不变；原演示数据保留。
+
+## 2026-10-22 调查持久化隔离 PG 复验与受控刷新入口
+用户在普通 PowerShell 运行最终源码专项：单方法 `test_failure_deadline_and_unsaved_report` 1 项、1.796 秒、OK；同入口完整专项 6 项、11.847 秒、OK。当前脚本在 Python 退出码非零时抛错，用户所示汇总均为 OK 且未出现该抛错；夹杂的 `System.Management.Automation.RemoteException` 是 PowerShell 对 Python stderr 的包装。用户未单独提供最终进程退出码数值，不能独立断言 shell 的数值退出码；不重复测试。六项覆盖占位可独立读取、同键并发、异参冲突、验证后报告持久化及权限撤销、失败/截止/中断的 SQL NULL 终态和临时 schema 清理；本轮不把它称为浏览器通过。
+新增本地专用受控刷新入口：`scripts/start_investigation_allocation_demo.ps1 -ControlledRefresh` 复用容器凭据的内存解析、既有隔离身份与 allocation schema，只检查/补齐该隔离 schema 的调查记录表；在 8126 启动 `scripts/investigation_refresh_controlled.py`，3112 启动独立 Next dev，页面明确显示“受控 Provider＋真实隔离数据库验收”。受控 Provider 只对一个确定性不存在的合成案件返回真实业务工具读取后的 `not_found` 报告，首轮延迟 20 秒便于刷新；不调用 Ollama/聊天模型，不证明库存归因。状态接口 `/__controlled_refresh_status` 仅返回调用次数、记录数、终态和保存数。页面手工验收尚待用户运行：运行中刷新读回 running，完成后刷新读回已保存报告，核对同一提交只产生一条记录和两次受控 Provider 调用。原演示数据保留，单 API worker 限制不变；未 commit/push，本人学习不标 PASS。
+## 2026-10-22 受控刷新验收：首轮结果与第二轮准备
+用户确认首轮受控运行 `provider_calls=2`、`run_count=1`、`saved_reports=1`、`statuses=["succeeded"]`；完成后刷新 React 页面仍能恢复已保存报告。首轮未在 running 时刷新，所以此断言仍未验收，不能把两次刷新合称通过。原已保存报告和 3112/8126 服务保留。
+为只补 running 刷新，新增 `-ControlledRefresh -ControlledRefreshSecond` 本地入口：3113→8127，独立 Next 构建目录和进程状态；沿用真实 JWT/API、同一隔离 PG schema，但新生成一个确定不存在的合成案件 ID，受控 Provider 的首轮等待 90 秒。新旧记录分别保留；不调用真实模型、不重建原演示数据。第二轮操作及结果待用户手工确认；目标是提交后立即刷新看到 running，结束后刷新读回报告，状态接口只见该轮 `provider_calls=2/run_count=1/saved_reports=1/succeeded`。PowerShell 解析、Python 语法、Ruff 与差异空白检查已通过；未运行第二轮数据库或浏览器验收，未 commit/push。
+## 2026-10-22 调查持久化冻结验收完成（受控 Provider）
+用户手工确认两轮本地页面验收：首轮在完成后刷新，已保存报告恢复；首轮状态 `provider_calls=2`、`run_count=1`、`saved_reports=1`、`statuses=["succeeded"]`。第二轮在 90 秒受控等待期间刷新，页面自动找回“运行中”；第二轮独立状态同样为 `provider_calls=2`、`run_count=1`、`saved_reports=1`、`statuses=["succeeded"]`。两轮均经真实 JWT/API 和保留的隔离 PG，聊天决策由受控 Provider 替代，不能称真实模型验收或库存分配归因 E2E。用户本机隔离 PG 单方法 1 项（1.796 秒）及专项 6 项（11.847 秒）均 OK，数值 shell 退出码未另存；离线 API 23 项沿用此前通过结果，不重复运行。受控合成案件的报告为 `not_found`，原演示数据和首轮报告保留。
+脱敏范围、代码与验证条件见 `docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md`。冻结功能，不再新增试跑。审查发现 Next 自动改写的 `frontend/next-env.d.ts`、`frontend/tsconfig.json` 及 `backend/tests/commerce/test_day6_postgres.py` 的无关换行变化，均保留工作区但不纳入本次白名单。原始 JSON/JSONL、日志、账号状态、依赖和临时进程状态不入仓。单 API worker 限制、服务重启后中断而非断点恢复仍保留；本轮未 commit/push，本人学习不标 PASS。
