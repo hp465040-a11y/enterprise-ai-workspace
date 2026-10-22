@@ -114,3 +114,6 @@ $RECYCLE.BIN/
 /frontend/.next-controlled-refresh_second/
 /scripts/investigation_refresh_controlled_processes.json
 /scripts/investigation_refresh_controlled_processes_second.json
+
+# Local job-search notes; keep outside the public repository.
+/resume_workspace/

@@ -1,14 +1,27 @@
-# Project A｜订单履约异常调查与受控处置
+# Project A｜订单履约异常调查与受控处置 Agent
 
-面向多企业的订单异常处理：成员登录并选择企业，提交订单案件调查；系统只读查询履约事实与授权 SOP，校验业务事件和知识来源后生成报告。成员据此**另行**创建客户通知申请，管理员人工审核；批准后仍须显式执行，系统才创建一条站内通知记录。报告不会自动触发处置，站内记录不代表邮件、短信已发送或客户已收到。
+这是 RAGForge AI 仓库中的 Project A。面向多企业订单履约异常，Agent 只读查询案件和履约事实、检索授权 SOP，并生成带来源引用的调查报告。成员需要处置时另行创建申请；**管理员审核批准后，仍须另行显式执行，系统才创建站内通知记录**。报告不自动触发处置，站内记录不代表邮件、短信已发送或客户已收到。
 
-这是 [RAGForge AI](docs/ARCHITECTURE.md) 仓库中的 Project A 交付范围。首页只列当前可核实能力；运行条件、历史试验与失败记录分别见[演示指南](docs/PROJECT_A_DEMO.md)、[脱敏证据](docs/PROJECT_A_BASELINE_EVIDENCE.md)和[施工交接](docs/PROJECT_A_CONTINUATION.md)。
+项目针对的是多来源事实难以核对、模型可能把线索误判为原因、跨企业知识可能越权进入报告，以及处置缺少人工把关与重复执行防线等问题。这里展示的是合成数据与隔离环境中的实现和验收，不声称已有生产用户或量化业务收益。
 
-## 用户流程
+## 使用流程
 
-`登录／选择企业 → 提交调查 → 等待或刷新找回状态 → 阅读报告与证据 → 创建处置申请 → 管理员批准或拒绝 → 对已批准申请显式执行 → 查看站内通知`
+`登录／选择企业 → 提交调查 → 等待或刷新找回状态 → 阅读报告与证据 → 手动创建处置申请 → 管理员批准或拒绝 → 对已批准申请显式执行 → 查看站内通知`
 
-调查与处置靠人工选择案件衔接；批准只改变申请状态，执行才写入站内记录。调查记录按企业、申请人和提交键去重；成功报告保存后，可在授权范围内重新读取。服务重启不会从 Graph 中间节点续算，旧运行会转为中断状态。
+调查与处置由人选择案件衔接。批准只改变申请状态，执行才创建系统内通知记录。
+
+## 核心能力与存档结果
+
+以下结果分别属于注明的日期、版本和环境；不跨版本相加为通过率。〔离线〕表示受控 Provider 回放，〔隔离〕表示真实隔离数据库／检索或认证链路，〔真实模型·单次〕表示本机聊天模型的一次运行。
+
+| 能力 | 机制与已验证范围 |
+| --- | --- |
+| **LangGraph Agent 编排** | 模型决策、工具校验与执行、报告校验是实际 Graph 节点；保留阶段门槛、来源校验、重复调用防线、预算及分阶段纠错。2026-10-19 当时版本的 **11 组受控 Provider 离线回放**与旧循环对照；这不是当前提交的完整等价回归。另一次当前 Graph 的真实页面调查收到 4 条业务事件、1 条独立 SOP 来源及六部分报告〔真实模型·单次〕。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **证据约束的限定归因** | 业务事件和 SOP 来源分别验证，SOP 不能代替订单事实。2026-10-21 合成订单的一次真实 Graph/API 调查引用 6 条业务事件与 1 条 SOP 来源，只限定为“该运单发货延迟与库存分配受阻有关”；整单其他原因及完成情况未知，建议未执行。该次耗时 **490.797 秒**；2026-10-22 的 React 展示验收使用保存响应回放，两者不是同一次实时浏览器到模型链路。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **SOP 检索与权限隔离** | 源码实现 Qdrant 向量检索、工作区内 PG/BM25 稀疏检索及 RRF 名次融合；这些排序机制的效果未做专项运行评测。JWT 用户、企业成员和工作区权限逐层校验，检索候选再经 PG 范围回填。2026-10-19 C10 在真实隔离 PG／Qdrant／Embedding 与受控聊天 Provider 下，核对跨工作区正文、chunk 和来源 ID 均未进入模型上下文，越权请求在读取前被拒绝〔隔离〕。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **审批事务与幂等** | 企业范围幂等键由数据库唯一约束兜底；审核与执行使用行锁，状态及审计处于各自事务边界。2026-10-19 **21 项**隔离 PG 定向测试通过；其中受控双会话同键创建最终为 1 份申请、1 条审计。真实 JWT/HTTP 链路另验证创建、批准和拒绝；批准不等于执行〔隔离〕。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **Celery＋Redis 文档入库** | worker 处理解析、分块、Embedding 与索引，检查 job 状态和 task ID。2026-10-19 隔离 Redis／PG／Qdrant 验证 1 次成功、1 次受控失败、1 次**已完成 job**重复投递；重复后 chunk、vector、usage 计数未增加。失败的 document/job 与 Celery 任务均记录失败；未验证多 worker 竞争或通用 exactly-once〔隔离〕。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **调查记录与刷新恢复** | 提交占位先于长模型调用落库，同键并发去重，报告校验通过才保存；授权历史读取重查企业与工作区。2026-10-22 用户本机隔离 PG 专项 **6 项**通过；两轮受控 Provider＋真实 JWT/API＋隔离 PG 页面验收分别确认运行中刷新找回状态、完成后刷新找回报告。它们不是新增真实聊天模型验收〔隔离〕。[证据](docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md) |
 
 ## 架构
 
@@ -24,8 +37,7 @@ flowchart LR
     K --> P
     K --> Q[(Qdrant)]
     G --> V[事件与 SOP 双来源校验]
-    V --> P
-    A --> S[ActionRequest Service]
+    A --> S[ActionRequest 审批 Service]
     S -->|各操作内状态与审计同事务| P
     A --> D[文档入库生产者]
     D --> R[(Redis broker)]
@@ -34,35 +46,18 @@ flowchart LR
     W --> Q
 ```
 
-## 已验证能力
+## 技术栈与演示
 
-| 能力 | 已有验证与边界 |
-| --- | --- |
-| **LangGraph Agent 编排** | 决策、工具校验／执行、报告校验为实际节点；11 组受控 Provider 离线对照旧循环。一次当前 Graph 的真实页面调查收到四条业务事件与一条 SOP 来源的六部分报告；不代表 C01–C12 全矩阵。见[基线摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md)。 |
-| **SOP RAG 与企业权限** | 工作区授权后进行向量／关键词混合检索；C10 隔离 PG、Qdrant 与受控聊天 Provider 验证跨工作区正文、chunk、来源 ID 不进入模型上下文。已存档本地检索未验证学习型 Rerank。见[基线摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md)。 |
-| **证据约束的限定归因** | 合成订单的单次真实 Graph/API 调查以六条业务事件和独立 SOP 来源，限定确认“该运单发货延迟与库存分配受阻有关”；整单完成及其他原因未知，建议未执行。该次耗时 **490.797 秒**，不构成稳定率或性能结论。React 页面另以保存响应回放验证展示、展开、复制和退出加载。见[基线摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md)。 |
-| **审批事务与幂等** | 企业范围的申请键由数据库唯一约束兜底，审核／执行阻止重复决定或重复站内记录；状态与审计同事务。最终 21 项隔离 PG 定向测试及真实 JWT/HTTP 链路有存档；批准不等于执行。见[基线摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md)。 |
-| **Celery＋Redis 文档入库** | 隔离 Redis worker、PG、Qdrant 中验证一项成功、一项受控失败及已完成 job 的重复投递；重复后 chunk／vector／usage 未增加。未验证多 worker 竞争或通用 exactly-once。见[基线摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md)。 |
-| **调查记录与刷新恢复** | 0009 迁移、提交占位、同键并发去重、截止／失败终态和已校验报告保存；隔离 PG 专项 6 项通过。两轮**受控 Provider＋真实 JWT/API＋隔离 PG** 页面验收分别确认运行中刷新找回状态、完成后刷新找回报告；各轮一条记录、一份报告、两次受控 Provider 调用。它们不是新的真实聊天模型验收。见[脱敏摘要](docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md)。 |
+主要技术：Python、FastAPI、LangGraph、PostgreSQL、Qdrant、Redis、Celery、Next.js。2026-10-22 核对的本地配置为 **Ollama `llama3.1:8b`** 聊天模型、**`nomic-embed-text`** Embedding（768 维），`RERANK_PROVIDER=none`；本地配置可能与其他部署不同。`docker-compose.yml` 定义 PostgreSQL、Redis、Qdrant、迁移、后端 API、Celery worker、前端、Prometheus 和 Grafana 服务；Ollama 在宿主机运行，不属于该 Compose 服务清单。
 
-## 启动与演示
+从新环境准备隔离数据与启动服务见[演示指南](docs/PROJECT_A_DEMO.md)。无需重新调用模型的[约三分钟分段演示](docs/PROJECT_A_3MIN_DEMO.md)依次展示历史真实结果的 React 回放、受控 Provider 的保存报告刷新读取，以及成员申请→管理员审核→显式执行后的站内记录。这三段使用不同的验证条件，不能合称一次实时浏览器到真实模型再到处置的端到端验收。
 
-推荐在 Windows 普通 PowerShell 使用[隔离演示指南](docs/PROJECT_A_DEMO.md#从新环境准备隔离演示)：准备 Python 3.12／Node.js、现有依赖、PostgreSQL／Redis／Qdrant 与本机 Ollama 模型；先建立空的 `ragforge_day6_test`。随后运行既有入口：
+## 当前边界与后续
 
-```powershell
-# 在已检出的仓库根目录执行；先完成下方链接中的依赖与隔离库准备
-powershell -NoProfile -ExecutionPolicy Bypass -File .\scripts\start_investigation_allocation_demo.ps1
-```
+- 调查按**单 API worker**验收；没有 Graph 持久化检查点或中途续算。服务重启后遗留运行转为中断；历史成功报告可按授权读取。
+- 库存分配受阻仅有合成订单的一次限定归因运行；其他原因类型、生产案件、当前 Graph 的 C01–C12 全矩阵及稳定率未验收。490.797 秒是单次耗时，不代表性能水平或改进。
+- 执行只创建 `not_sent` 站内记录，未接入邮件或短信；多 worker 入库竞争与通用并发限流也未验收。
 
-脚本仅针对受保护的隔离库准备身份、迁移、合成案件及独立 SOP collection，成功时打印页面、案件、工作区和分析时点。**不要把曾经运行的本地端口当作永久服务**：演示前重新检查 `READY` 与本机资源；不要把脚本指向业务数据库。
+后续可围绕单次调查耗时、具有订单级关联证据的其他原因类型，以及区分首答／纠错结果的小型评测集继续完善；这些是计划，不是已交付能力。
 
-无需重新调用模型的展示分为三条路径：[约三分钟录屏脚本](docs/PROJECT_A_3MIN_DEMO.md)逐步说明 **历史真实结果的 React 保存响应回放**、**受控 Provider 的数据库报告刷新恢复**、以及**同一隔离企业的申请→审核→站内通知**。这些是分段证据，不能合称一次实时浏览器到真实模型再到处置的 E2E。需要真实调查时，使用上面的隔离 3110 页面单次提交；耗时与模型可用性依赖本机环境。
-
-## 限制
-
-- 当前调查执行只按**单 API worker**验收；无 Graph 持久化检查点、断点续算或调查到处置的自动衔接。
-- 490.797 秒是一次合成场景真实调查的耗时；尚无重复运行稳定率或性能改进结论。不能为缩短等待放宽证据与权限校验。
-- 站内通知 `not_sent` 不表示外部送达；没有邮件／短信服务或客户收悉证明。
-- C01–C12 当前 Graph 全矩阵、多 worker 入库竞争、通用并发限流与生产案件根因覆盖均未验收。完整施工记录见[交接](docs/PROJECT_A_CONTINUATION.md)。
-
-本仓库另含通用 RAG SaaS 组件；其部署与监控配置见[系统架构](docs/ARCHITECTURE.md)。本页的验收结论只适用于上表注明的日期、版本和环境。许可证见[MIT](LICENSE)。
+原始运行文件仅在本地保留；公开仓库引用[脱敏基线摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md)和[调查记录验收摘要](docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md)。项目许可见[MIT](LICENSE)。
