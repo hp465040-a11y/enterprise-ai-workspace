@@ -117,3 +117,10 @@ $RECYCLE.BIN/
 
 # Local job-search notes; keep outside the public repository.
 /resume_workspace/
+
+# Local-only model evaluation candidates, traces, and one-attempt guard.
+/scripts/investigation_minieval_*.json
+/scripts/investigation_minieval_*.jsonl
+/scripts/investigation_minieval_*.json.tmp
+/scripts/investigation_minieval.active
+/scripts/investigation_minieval_*_once.active

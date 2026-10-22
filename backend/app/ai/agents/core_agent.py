@@ -205,7 +205,9 @@ REPORT_DATA_BOUNDARY = (
 SHORT_REPORT_BOUNDARY = (
     "\nFor this report only, cite business events with E1, E2, ... in evidence_event_ids "
     "and retrieved knowledge with K1, K2, ... in knowledge_source_ids. "
-    "Use every required label from the separate lists in the verified report data. "
+    "Match every field in verified_report_requirements, including the root cause derived "
+    "from allocation status and causal status; use every required E and K label. "
+    "A missing allocation observation or unknown causal status requires root_cause=unknown. "
     "Do not output UUIDs in either citation list or interchange E and K labels. "
     "The server resolves labels and applies the original UUID evidence validator."
 )
@@ -228,6 +230,26 @@ def _report_reference_map(trace):
         "knowledge_source_ids": {f"K{index}": identifier for index, identifier in
                                  enumerate(contract.get("knowledge_source_ids", []), 1)},
     }
+
+
+def _short_report_requirements(trace):
+    """Expose the existing evidence contract with per-report labels, without changing it."""
+    contract = evidence_contract(trace)
+    mapping = _report_reference_map(trace)
+    return {**contract, "evidence_event_ids": list(mapping["evidence_event_ids"]),
+            "knowledge_source_ids": list(mapping["knowledge_source_ids"])}
+
+
+def _short_report_field_diff(content, trace):
+    try:
+        candidate = json.loads(content)
+    except (TypeError, ValueError):
+        return {"candidate_json_error": "not_valid_json"}
+    if not isinstance(candidate, dict):
+        return {"candidate_json_error": "not_object"}
+    required = _short_report_requirements(trace)
+    return {field: {"candidate": candidate.get(field), "required": required[field]}
+            for field in ("outcome", "root_cause") if candidate.get(field) != required[field]}
 
 
 def _short_report_citation_diff(content, trace):
@@ -272,16 +294,16 @@ def _resolve_report_references(content, trace):
 
 
 def _short_report_correction_feedback(content, trace):
-    contract = evidence_contract(trace)
-    mapping = _report_reference_map(trace)
-    expected = {**contract, "evidence_event_ids": list(mapping["evidence_event_ids"]),
-                "knowledge_source_ids": list(mapping["knowledge_source_ids"])}
+    expected = _short_report_requirements(trace)
     return ("Invalid evidence JSON. Keep the same verified observations and report using only "
             "the required E and K labels; never invent, duplicate, mix types, or omit labels. "
             "Expected report fields: " + json.dumps(expected)
             + ". Exact citation differences: "
             + json.dumps(_short_report_citation_diff(content, trace))
-            + ". Return only corrected evidence JSON; omit prose.")
+            + ". Outcome/root-cause differences: "
+            + json.dumps(_short_report_field_diff(content, trace))
+            + ". Change each listed mismatch in the rejected candidate; do not repeat it unchanged. "
+            "Return only corrected evidence JSON; omit prose.")
 
 
 def _compact_observed_report(messages, trace, *, organization_id, case_id, order_id, as_of):
@@ -312,6 +334,11 @@ def _compact_observed_report(messages, trace, *, organization_id, case_id, order
         "required_report_citations": {
             "evidence_event_ids": list(references["evidence_event_ids"]),
             "knowledge_source_ids": list(references["knowledge_source_ids"]),
+        },
+        "verified_report_requirements": _short_report_requirements(trace),
+        "causal_basis": {
+            "allocation_status": (analysis.get("allocation") or {}).get("status"),
+            "causal_status": (analysis.get("allocation") or {}).get("causal_status"),
         },
         "citation_reference_map": {
             "business_events": [{"ref": label, "event_id": identifier,
