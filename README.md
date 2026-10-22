@@ -16,12 +16,12 @@
 
 | 能力 | 机制与已验证范围 |
 | --- | --- |
-| **LangGraph Agent 编排** | 模型决策、工具校验与执行、报告校验是实际 Graph 节点；保留阶段门槛、来源校验、重复调用防线、预算及分阶段纠错。2026-10-19 当时版本的 **11 组受控 Provider 离线回放**与旧循环对照；这不是当前提交的完整等价回归。另一次当前 Graph 的真实页面调查收到 4 条业务事件、1 条独立 SOP 来源及六部分报告〔真实模型·单次〕。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **证据约束的限定归因** | 业务事件和 SOP 来源分别验证，SOP 不能代替订单事实。2026-10-21 合成订单的一次真实 Graph/API 调查引用 6 条业务事件与 1 条 SOP 来源，只限定为“该运单发货延迟与库存分配受阻有关”；整单其他原因及完成情况未知，建议未执行。该次耗时 **490.797 秒**；2026-10-22 的 React 展示验收使用保存响应回放，两者不是同一次实时浏览器到模型链路。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **SOP 检索与权限隔离** | 源码实现 Qdrant 向量检索、工作区内 PG/BM25 稀疏检索及 RRF 名次融合；这些排序机制的效果未做专项运行评测。JWT 用户、企业成员和工作区权限逐层校验，检索候选再经 PG 范围回填。2026-10-19 C10 在真实隔离 PG／Qdrant／Embedding 与受控聊天 Provider 下，核对跨工作区正文、chunk 和来源 ID 均未进入模型上下文，越权请求在读取前被拒绝〔隔离〕。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **审批事务与幂等** | 企业范围幂等键由数据库唯一约束兜底；审核与执行使用行锁，状态及审计处于各自事务边界。2026-10-19 **21 项**隔离 PG 定向测试通过；其中受控双会话同键创建最终为 1 份申请、1 条审计。真实 JWT/HTTP 链路另验证创建、批准和拒绝；批准不等于执行〔隔离〕。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **Celery＋Redis 文档入库** | worker 处理解析、分块、Embedding 与索引，检查 job 状态和 task ID。2026-10-19 隔离 Redis／PG／Qdrant 验证 1 次成功、1 次受控失败、1 次**已完成 job**重复投递；重复后 chunk、vector、usage 计数未增加。失败的 document/job 与 Celery 任务均记录失败；未验证多 worker 竞争或通用 exactly-once〔隔离〕。[证据](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **调查记录与刷新恢复** | 提交占位先于长模型调用落库，同键并发去重，报告校验通过才保存；授权历史读取重查企业与工作区。2026-10-22 用户本机隔离 PG 专项 **6 项**通过；两轮受控 Provider＋真实 JWT/API＋隔离 PG 页面验收分别确认运行中刷新找回状态、完成后刷新找回报告。它们不是新增真实聊天模型验收〔隔离〕。[证据](docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md) |
+| **LangGraph Agent 编排** | 验证了模型决策、工具校验与执行、报告校验在实际 Graph 节点中衔接，阶段门槛、来源校验、预算和纠错仍生效。2026-10-19 当时版本的 **11 组受控 Provider 离线回放**与旧循环对照，并非当前版本的完整等价回归；另有当前 Graph 的真实页面调查收到经校验的六部分报告〔真实模型·单次〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **证据约束的限定归因** | 验证了业务事件与 SOP 来源分别校验，SOP 不代替订单事实。2026-10-21 合成订单的单次真实 Graph/API 调查仅确认“该运单发货延迟与库存分配受阻有关”，整单其他原因及完成情况保持未知，建议未执行；React 展示另用保存响应回放验收，不能合称实时浏览器到模型链路。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **SOP 检索与权限隔离** | 2026-10-19 C10 在 Graph 迁移前，以隔离 PG／Qdrant／Embedding 和受控聊天 Provider 验证：跨工作区正文、chunk 与来源 ID 未进入模型上下文，越权请求在检索前被拒绝。源码实现向量检索、工作区内 PG/BM25 稀疏检索及 RRF 融合；排序效果未做专项运行评测。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **审批事务与幂等** | 隔离 PostgreSQL 定向测试通过，验证企业范围幂等键的唯一约束、并发同键去重、审核与执行的行锁及审计事务回滚；真实 JWT/HTTP 链路验证创建、批准和拒绝。批准不会自动执行处置〔隔离〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **Celery＋Redis 文档入库** | 2026-10-19 隔离 Redis／PG／Qdrant 验证入库成功、受控失败及已完成 job 重复投递：重复后 chunk、vector、usage 未增加；失败的 document/job 和 Celery 任务分别记录失败。未验证多 worker 竞争或通用 exactly-once〔隔离〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **调查记录与刷新恢复** | 2026-10-22 隔离 PostgreSQL 专项验证提交占位独立可读、同键并发去重、报告校验后持久化及授权历史读取；受控 Provider＋真实 JWT/API＋隔离 PG 页面验收分别确认运行中刷新找回状态、完成后刷新找回报告。不是新增真实聊天模型验收〔隔离〕。[脱敏摘要](docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md) |
 
 ## 架构
 
