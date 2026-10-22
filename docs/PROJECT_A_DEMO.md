@@ -1,13 +1,27 @@
 # Project A demo: verified report and authenticated ActionRequest flow
 
-## Current local delivery path (new installation)
+## 从新环境准备隔离演示
+
+三个入口各有独立验收边界；端口仅在对应本地进程启动且预检通过后可用：
+
+| 入口 | 用途 | 模型调用 |
+| --- | --- | --- |
+| `http://127.0.0.1:3110/login`（8125 API） | 原隔离案件的真实调查与申请审核；2026-10-22 检查时运行的旧 API 对调查历史 GET 返回 405，不用它展示刷新恢复 | 新提交真实调查会调用聊天模型 |
+| `http://127.0.0.1:3111/login` | [历史真实结果的 React 保存响应回放](#saved-allocation-report-in-the-actual-react-page)；代理绝不把调查 POST 转给 8125 | 不会 |
+| `http://127.0.0.1:3112/login`（8126 API；3113／8127 为第二轮） | [调查刷新恢复验收](PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md)使用的受控 Provider；2026-10-22 授权读取确认两份已保存报告。3112 的申请页也通过认证列表读取检查 | 不调用真实聊天模型；录屏只读取既有调查记录 |
+
+录屏只需按[约三分钟分段脚本](PROJECT_A_3MIN_DEMO.md)准备；以下是从新环境复现隔离演示的完整路径，不代表端口现在仍在运行。
 
 This path uses the existing isolated preparation scripts. It does not migrate the business
 database or reuse a rolled-back C05 case. From a new checkout, install the existing
 backend/frontend dependencies, start this project's PostgreSQL, Redis and Qdrant,
 and make the configured Ollama chat and embedding models available:
 
+在仓库根目录检查 `.env`；首次安装才从 `.env.example` 复制，设置本地独有的 `SECRET_KEY` 与 PostgreSQL 配置。不要覆盖已有 `.env`，也不要将凭据提交或录入演示证据。Ollama 是宿主机依赖，不由以下 Compose 命令启动；所配置的聊天与 Embedding 模型须已在本机可用，启动脚本会预检。
+
 ```powershell
+if (-not (Test-Path -LiteralPath .env)) { Copy-Item -LiteralPath .env.example -Destination .env }
+# 首次复制后，在本机设置独有的 SECRET_KEY 与 PostgreSQL 密码；不要提交 .env
 py -3.12 -m venv .venv-d4
 .\.venv-d4\Scripts\python.exe -m pip install -r backend/requirements-dev.txt
 Push-Location frontend; npm ci; Pop-Location
@@ -22,7 +36,8 @@ is an operator prerequisite, not a migration of the Compose business database.
 After confirming the database is absent, the one-time PowerShell command is:
 
 ```powershell
-docker compose exec postgres sh -c 'psql -U "$POSTGRES_USER" -d postgres -c "CREATE DATABASE ragforge_day6_test"'
+'CREATE DATABASE ragforge_day6_test;' |
+    docker compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -X -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d postgres'
 ```
 
 From ordinary PowerShell in the repository root, with the existing test database ready:
@@ -38,6 +53,27 @@ adds the existing ActionRequest migrations `0005`–`0007` and run migration `00
 only in that guarded allocation schema when needed, and starts
 the isolated API/page at `127.0.0.1:8125` / `127.0.0.1:3110`. It refuses partially
 prepared state and occupied ports. Credentials are restored in the launcher process.
+The SQL above goes to `psql` through standard input (`docker compose exec -T`), so
+Windows shell argument parsing cannot split the multiword statement.
+For the retained allocation case, the same **read-only** standard-input pattern
+checks that the case and its order belong to the fixture enterprise. The state
+must already be guarded; a result of `ragforge_day6_test|1` was confirmed by the
+user in ordinary PowerShell on 2026-10-22:
+
+```powershell
+$s = Get-Content -LiteralPath 'scripts/investigation_allocation_demo_state.json' -Raw -Encoding UTF8 | ConvertFrom-Json
+if ($s.database -ne 'ragforge_day6_test' -or $s.schema -notmatch '^allocation_demo_[0-9a-f]{32}$' -or
+    $s.case_id -ne '7beb2d8e-7ec6-4aef-b48e-3308a8881a21' -or
+    $s.organization_id -ne 'd6f90c90-01b5-42de-81f5-5d4e2268aee7') { throw 'Unexpected fixture scope' }
+$sql = 'SELECT current_database(), COUNT(*) FROM "' + $s.schema +
+       '".exception_cases c JOIN "' + $s.schema +
+       '".orders o ON o.id=c.order_id WHERE c.id=''' + $s.case_id +
+       '''::uuid AND c.organization_id=''' + $s.organization_id +
+       '''::uuid AND o.organization_id=c.organization_id;'
+$sql | docker compose exec -T postgres sh -c 'PGPASSWORD="$POSTGRES_PASSWORD" exec psql -XAt -v ON_ERROR_STOP=1 -U "$POSTGRES_USER" -d ragforge_day6_test'
+if ($LASTEXITCODE -ne 0) { throw 'Read-only case check failed' }
+```
+
 For a database-only check before starting the demo, run
 `.\scripts\start_investigation_allocation_demo.ps1 -VerifyOnly` in ordinary PowerShell.
 It runs the targeted investigation lifecycle tests against random schemas in
