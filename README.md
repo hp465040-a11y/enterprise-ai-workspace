@@ -69,4 +69,4 @@ flowchart LR
 
 ## 说明
 
-原始运行文件仅本地保留，公开仓库提供[脱敏基线摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md)和[调查记录验收摘要](docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md)；许可证为 [MIT](LICENSE)。
+原始运行文件仅本地保留，公开仓库提供[脱敏基线摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md)和[调查记录验收摘要](docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md)。[最小评测记录](docs/PROJECT_A_MINI_EVAL.md)覆盖限定归因、证据不足和案件不存在三类场景，记录真实运行结果、失败归因及报告纠错改进；其中 B2 修复后的通过仅限保存观察的报告阶段。许可证为 [MIT](LICENSE)。
