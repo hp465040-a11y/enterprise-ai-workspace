@@ -16,11 +16,11 @@
 
 | 能力 | 机制与已验证范围 |
 | --- | --- |
-| **LangGraph Agent 编排** | 验证了模型决策、工具校验与执行、报告校验在实际 Graph 节点中衔接，阶段门槛、来源校验、预算和纠错仍生效。2026-10-19 当时版本的 **11 组受控 Provider 离线回放**与旧循环对照，并非当前版本的完整等价回归；另有当前 Graph 的真实页面调查收到经校验的六部分报告〔真实模型·单次〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **证据约束的限定归因** | 验证了业务事件与 SOP 来源分别校验，SOP 不代替订单事实。2026-10-21 合成订单的单次真实 Graph/API 调查仅确认“该运单发货延迟与库存分配受阻有关”，整单其他原因及完成情况保持未知，建议未执行；React 展示另用保存响应回放验收，不能合称实时浏览器到模型链路。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **SOP 检索与权限隔离** | 2026-10-19 C10 在 Graph 迁移前，以隔离 PG／Qdrant／Embedding 和受控聊天 Provider 验证：跨工作区正文、chunk 与来源 ID 未进入模型上下文，越权请求在检索前被拒绝。源码实现向量检索、工作区内 PG/BM25 稀疏检索及 RRF 融合；排序效果未做专项运行评测。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **审批事务与幂等** | 隔离 PostgreSQL 定向测试通过，验证企业范围幂等键的唯一约束、并发同键去重、审核与执行的行锁及审计事务回滚；真实 JWT/HTTP 链路验证创建、批准和拒绝。批准不会自动执行处置〔隔离〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
-| **Celery＋Redis 文档入库** | 2026-10-19 隔离 Redis／PG／Qdrant 验证入库成功、受控失败及已完成 job 重复投递：重复后 chunk、vector、usage 未增加；失败的 document/job 和 Celery 任务分别记录失败。未验证多 worker 竞争或通用 exactly-once〔隔离〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md) |
+| **LangGraph Agent 编排** | 验证了模型决策、工具校验与执行、报告校验在实际 Graph 节点中衔接，阶段门槛、来源校验、预算和纠错仍生效。2026-10-19 当时版本的 **11 组受控 Provider 离线回放**与旧循环对照，并非当前版本的完整等价回归；另有当前 Graph 的真实页面调查收到经校验的六部分报告〔真实模型·单次〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md#project-a-core-graph) |
+| **证据约束的限定归因** | 验证了业务事件与 SOP 来源分别校验，SOP 不代替订单事实。2026-10-21 合成订单的单次真实 Graph/API 调查仅确认“该运单发货延迟与库存分配受阻有关”，整单其他原因及完成情况保持未知，建议未执行；React 展示另用保存响应回放验收，不能合称实时浏览器到模型链路。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md#project-a-scoped-attribution) |
+| **SOP 检索与权限隔离** | 2026-10-19 C10 在 Graph 迁移前，以隔离 PG／Qdrant／Embedding 和受控聊天 Provider 验证：跨工作区正文、chunk 与来源 ID 未进入模型上下文，越权请求在检索前被拒绝。源码实现向量检索、工作区内 PG/BM25 稀疏检索及 RRF 融合；排序效果未做专项运行评测。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md#project-a-knowledge-boundary) |
+| **审批事务与幂等** | 隔离 PostgreSQL 定向测试通过，验证企业范围幂等键的唯一约束、并发同键去重、审核与执行的行锁及审计事务回滚；真实 JWT/HTTP 链路验证创建、批准和拒绝。批准不会自动执行处置〔隔离〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md#project-a-action-request) |
+| **Celery＋Redis 文档入库** | 2026-10-19 隔离 Redis／PG／Qdrant 验证入库成功、受控失败及已完成 job 重复投递：重复后 chunk、vector、usage 未增加；失败的 document/job 和 Celery 任务分别记录失败。未验证多 worker 竞争或通用 exactly-once〔隔离〕。[脱敏摘要](docs/PROJECT_A_BASELINE_EVIDENCE.md#project-a-celery-ingestion) |
 | **调查记录与刷新恢复** | 2026-10-22 隔离 PostgreSQL 专项验证提交占位独立可读、同键并发去重、报告校验后持久化及授权历史读取；受控 Provider＋真实 JWT/API＋隔离 PG 页面验收分别确认运行中刷新找回状态、完成后刷新找回报告。不是新增真实聊天模型验收〔隔离〕。[脱敏摘要](docs/PROJECT_A_INVESTIGATION_RUN_ACCEPTANCE.md) |
 
 ## 架构
